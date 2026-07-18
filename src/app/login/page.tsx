@@ -87,9 +87,17 @@ export default function LoginPage() {
       }
 
       // Prefer loading wallet profile; fall back to verify payload
+      // OTP callback may still be writing the welcome bonus — poll briefly
       let user = await refreshUser();
+      for (let i = 0; i < 6 && user; i++) {
+        const hasBonus =
+          Number(user.balance ?? 0) >= 10 || !!user.welcomeBonusClaimed;
+        if (hasBonus && Number(user.balance ?? 0) > 0) break;
+        await new Promise((r) => setTimeout(r, 350));
+        user = (await refreshUser()) || user;
+      }
       if (!user && data?.user?.id) {
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 400));
         user = await refreshUser();
       }
       if (!user && data?.user?.id) {
@@ -103,6 +111,7 @@ export default function LoginPage() {
           balance: 0,
           telegramId: null,
         });
+        // Still go home — /api/me will repair bonus on next refresh
         router.replace("/");
         return;
       }

@@ -82,6 +82,7 @@ export interface User {
   phoneNumber: string | null;
   registered: boolean;
   balance: number; // Decimal -> number
+  welcomeBonusClaimed?: boolean;
   isActive?: boolean;
   role?: 'ADMIN' | 'OPERATOR' | 'USER' | string;
   createdAt?: string | Date;

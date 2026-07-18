@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { SocketProvider } from "../context/SocketContext";
 import { GameProvider } from "../context/gameContext";
 import BottomNav from "./BottomNav";
+import OnboardingGate from "./OnboardingGate";
 
 const PUBLIC_PATHS = new Set(["/login"]);
 const HIDE_NAV_PATHS = new Set(["/login", "/cards", "/game"]);
@@ -28,6 +29,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <SocketProvider>
       <GameProvider>
         <div className="min-h-screen pb-28">{children}</div>
+        <OnboardingGate />
         {!hideNav && <BottomNav />}
       </GameProvider>
     </SocketProvider>

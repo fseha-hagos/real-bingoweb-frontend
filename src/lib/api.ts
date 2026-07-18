@@ -165,6 +165,13 @@ class ApiClient {
     method: string;
     paymentPhone: string;
     instructions: string;
+    steps?: {
+      methodTitle: string;
+      amount: number;
+      paymentPhone: string;
+      steps: string[];
+      note: string;
+    };
     status: string;
   }>> {
     return this.request("/api/wallet/deposit", {

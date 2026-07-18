@@ -13,11 +13,8 @@ const nextConfig: NextConfig = {
         : "http://localhost:3001");
 
     return [
-      // Auth is handled by src/app/api/auth/[...all]/route.ts (cookie-safe proxy)
-      {
-        source: "/api/((?!auth/).*)",
-        destination: `${backendUrl}/api/$1`,
-      },
+      // Player + auth APIs use Route Handlers (see src/app/api/**) so methods
+      // like PATCH are forwarded correctly. Keep games/health rewrites only.
       {
         source: "/games",
         destination: `${backendUrl}/games`,
