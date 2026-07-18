@@ -1,0 +1,26 @@
+{
+  "name": "telegram-bingo-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for the Bingo webapp",
+  "main": "bot-example.js",
+  "scripts": {
+    "start": "node bot-example.js",
+    "dev": "nodemon bot-example.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "bingo",
+    "game",
+    "webapp"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
