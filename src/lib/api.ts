@@ -9,7 +9,7 @@ import {
   VerifyResponse,
 } from '../types/game';
 
-const PRODUCTION_BACKEND_URL = "http://localhost:3001";
+const PRODUCTION_BACKEND_URL = "https://real-bingoweb-backend.onrender.com";
 
 export function getApiBaseUrl(): string {
   return (

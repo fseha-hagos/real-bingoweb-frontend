@@ -41,8 +41,8 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
 
     const serverUrl =
       isBrowserLocal && (!envUrl || looksRemote)
-        ? "http://localhost:3001"
-        : envUrl || "http://localhost:3001";
+        ? "https://real-bingoweb-backend.onrender.com"
+        : envUrl || "https://real-bingoweb-backend.onrender.com";
 
     console.log("🔌 Socket connecting to:", serverUrl);
     setConnectionStatus('connecting');

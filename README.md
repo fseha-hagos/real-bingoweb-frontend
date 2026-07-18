@@ -17,8 +17,8 @@ Backend must be running (`bingo-tg-bot` on port `3001`).
 ## Environment
 
 ```env
-BACKEND_URL=http://localhost:3001
-NEXT_PUBLIC_API_URL=http://localhost:3001
+BACKEND_URL=https://real-bingoweb-backend.onrender.com
+NEXT_PUBLIC_API_URL=https://real-bingoweb-backend.onrender.com
 ```
 
 OTP in local dev: check the **backend console** for `[auth] OTP issued...` when `SMS_PROVIDER=console`.

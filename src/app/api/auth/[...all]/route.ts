@@ -7,7 +7,7 @@ function getBackendUrl() {
   return (
     process.env.BACKEND_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    "http://localhost:3001"
+    "https://real-bingoweb-backend.onrender.com"
   );
 }
 
