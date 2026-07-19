@@ -12,14 +12,36 @@ function getBackendUrl() {
 }
 
 /**
+ * Rewrite upstream Set-Cookie onto the Next.js frontend origin.
+ * - Drop Domain so the cookie binds to vercel.app / localhost
+ * - Keep Secure on HTTPS (Vercel); strip Secure (+ __Secure-/__Host- prefix) on HTTP
+ */
+function rewriteSetCookie(cookie: string, isHttps: boolean): string {
+  let cleaned = cookie.replace(/;\s*Domain=[^;]*/gi, "");
+
+  if (isHttps) {
+    if (!/;\s*Secure\b/i.test(cleaned)) {
+      cleaned += "; Secure";
+    }
+  } else {
+    cleaned = cleaned
+      .replace(/^(__Secure-|__Host-)/i, "")
+      .replace(/;\s*Secure\b/gi, "");
+  }
+
+  return cleaned;
+}
+
+/**
  * Explicit proxy for Better Auth so Set-Cookie reaches the browser on the
- * Next.js origin (localhost:3000). Rewrites alone are unreliable for cookies.
+ * Next.js origin. Rewrites alone are unreliable for cookies.
  */
 async function proxy(req: NextRequest, pathSegments: string[]) {
   const backend = getBackendUrl().replace(/\/$/, "");
   const subPath = pathSegments.join("/");
   const url = new URL(req.url);
   const target = `${backend}/api/auth/${subPath}${url.search}`;
+  const isHttps = url.protocol === "https:";
 
   const headers = new Headers();
   const contentType = req.headers.get("content-type");
@@ -48,23 +70,17 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   const upstreamType = upstream.headers.get("content-type");
   if (upstreamType) resHeaders.set("content-type", upstreamType);
 
-  // Forward all Set-Cookie headers (important for session)
-  const getSetCookie = (upstream.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
+  const getSetCookie = (
+    upstream.headers as Headers & { getSetCookie?: () => string[] }
+  ).getSetCookie?.();
   if (getSetCookie && getSetCookie.length > 0) {
     for (const c of getSetCookie) {
-      // Force cookie onto the frontend origin (drop Domain if backend set one)
-      const cleaned = c
-        .replace(/;\s*Domain=[^;]*/gi, "")
-        .replace(/;\s*Secure/gi, "");
-      resHeaders.append("set-cookie", cleaned);
+      resHeaders.append("set-cookie", rewriteSetCookie(c, isHttps));
     }
   } else {
     const single = upstream.headers.get("set-cookie");
     if (single) {
-      resHeaders.append(
-        "set-cookie",
-        single.replace(/;\s*Domain=[^;]*/gi, "").replace(/;\s*Secure/gi, "")
-      );
+      resHeaders.append("set-cookie", rewriteSetCookie(single, isHttps));
     }
   }
 
