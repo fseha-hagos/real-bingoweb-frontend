@@ -4,13 +4,13 @@
  * Thin Better Auth HTTP client (no better-auth npm package required).
  * Uses same-origin /api/auth/* (Next.js rewrites to the backend).
  */
-
+const API_URL = "https://real-bingoweb-backend.onrender.com";
 async function authFetch<T = unknown>(
   path: string,
   init: RequestInit = {}
 ): Promise<{ data: T | null; error: { message: string; status?: number } | null }> {
   try {
-    const res = await fetch(`/api/auth${path}`, {
+    const res = await fetch(`${API_URL}/api/auth${path}`, {
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
