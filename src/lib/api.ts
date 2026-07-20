@@ -160,9 +160,34 @@ class ApiClient {
     minDeposit: number;
     minWithdraw: number;
     maxWithdraw: number;
+    minBalanceAfterWithdraw?: number;
+    minFirstDeposit?: number;
+    minGamesBeforeWithdraw?: number;
     methods: { id: string; label: string; phone: string | null }[];
   }>> {
     return this.request("/api/wallet/config", {
+      method: "GET",
+      credentials: "include",
+    });
+  }
+
+  async attachReferral(inviterId: string): Promise<ApiResponse<{ attached: boolean; reason?: string }>> {
+    return this.request("/api/referrals/attach", {
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ inviterId }),
+    });
+  }
+
+  async getMyReferral(): Promise<ApiResponse<{
+    inviteUrl: string;
+    inviteCode: string;
+    rewardPerInvite: number;
+    inviteCount: number;
+    rewardTotal: number;
+    rewardCount: number;
+  }>> {
+    return this.request("/api/referrals/me", {
       method: "GET",
       credentials: "include",
     });

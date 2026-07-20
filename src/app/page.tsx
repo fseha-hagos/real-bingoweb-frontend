@@ -19,6 +19,7 @@ export default function PlayPage() {
   const bets = [10, 50, 100, 300];
   const [rejoinData, setRejoinData] = useState<{ gameId: string; bet: number } | null>(null);
   const [balanceRefreshing, setBalanceRefreshing] = useState(false);
+  const [joiningGame, setJoiningGame] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   const { connected } = useSocket();
@@ -75,15 +76,18 @@ export default function PlayPage() {
   }, [player, games]);
 
   const handleSelectBet = (gameId: string, bet: number) => {
+    setJoiningGame(true);
     sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ gameId, bet }));
 
     if (connected) {
       watchGame(bet);
     } else {
       toast.warn(am.notConnected);
+      setJoiningGame(false);
     }
 
     router.push('/cards');
+    setJoiningGame(false);
   };
 
   return (
@@ -245,7 +249,7 @@ export default function PlayPage() {
                       <div className="flex justify-end">
                         <button
                           onClick={() => canPlay && handleSelectBet(id, bet)}
-                          disabled={!canPlay}
+                          disabled={!canPlay || joiningGame}
                           className={canPlay ? 'lobby-play-btn is-ready' : 'lobby-play-btn'}
                         >
                           {status === 'finished'

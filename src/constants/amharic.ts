@@ -38,7 +38,8 @@ export const am = {
   copied: "ተቀድቷል",
   depositHowTo: "እንዴት ማስገባት",
   withdrawHowTo: "እንዴት ማውጣት",
-  withdrawHint: "ወደ ስልክ ቁጥርዎ ይላካል ከማረጋገጫ በኋላ። ቢያንስ 5 ጨዋታ እና 50 ብር በዋሌት መቆየት አለበት።",
+  withdrawHint:
+    "ወደ ስልክ ቁጥርዎ ይላካል ከማረጋገጫ በኋላ። ቢያንስ አንድ ጊዜ ≥50 ብር ዲፖዚት፣ 5 ጨዋታ፣ እና ከወጪ በኋላ 20 ብር መቆየት አለበት።",
   pendingRequests: "በመጠባበቅ ላይ",
   selectAmount: "መጠን ይምረጡ",
   sendExactAmount: "ትክክለኛውን መጠን ይላኩ",
@@ -46,7 +47,16 @@ export const am = {
   walletHistory: "ታሪክ",
   noPending: "ምንም በመጠባበቅ ላይ የለም",
   depositStepCreated: "ጥያቄ ተፈጥሯል — አሁን ክፍያ ይፈጽሙ",
-  keepMinBalance: "ከወጪ በኋላ ቢያንስ 50 ብር መቆየት አለበት",
+  keepMinBalance: "ከወጪ በኋላ ቢያንስ 20 ብር መቆየት አለበት",
+  needFirstDeposit: "ከመውጣ በፊት ቢያንስ አንድ ጊዜ ≥50 ብር የተፈቀደ ዲፖዚት ያስፈልጋል",
+
+  // Referral
+  inviteFriends: "ጓደኞችን ጋብዝ",
+  inviteHint: "ሊንኩን ያጋሩ — ጓደኛዎ ሲመዘገብና ≥50 ብር ሲያስገባ ቦነስ ያገኛሉ",
+  inviteCopied: "የግብዣ ሊንክ ተቀድቷል",
+  inviteCount: (n: number) => `${n} ጓደኛ ተጋብዟል`,
+  inviteReward: (n: number) => `${n} ብር በግብዣ`,
+  copyInviteLink: "ሊንክ ቅዳ",
 
   // Connection
   systemLive: "ስርዓቱ በሥራ ላይ",

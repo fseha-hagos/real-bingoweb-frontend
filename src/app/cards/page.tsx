@@ -228,7 +228,7 @@ export default function CardsPage() {
                         isSelected
                           ? 'bg-brand-primary text-white scale-110 shadow-lg z-10'
                           : cardOccupied
-                            ? 'bg-white/5 text-gray-700 cursor-not-allowed border border-white/5'
+                            ? 'bg-red-600 text-gray-300 cursor-not-allowed border border-white/5'
                             : 'bg-white/5 text-gray-400 border border-white/5 hover:bg-white/10 hover:text-white'
                       }
                     `}

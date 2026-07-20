@@ -34,6 +34,9 @@ export default function WalletPage() {
     minDeposit: number;
     minWithdraw: number;
     maxWithdraw: number;
+    minBalanceAfterWithdraw?: number;
+    minFirstDeposit?: number;
+    minGamesBeforeWithdraw?: number;
     methods: { id: string; label: string; phone: string | null }[];
   } | null>(null);
   const [requests, setRequests] = useState<
@@ -95,7 +98,8 @@ export default function WalletPage() {
       if (numericAmount > balance) {
         return `Insufficient balance (${balance} ETB)`;
       }
-      if (balance - numericAmount < 50) {
+      const minLeft = config?.minBalanceAfterWithdraw ?? 20;
+      if (balance - numericAmount < minLeft) {
         return am.keepMinBalance;
       }
     }

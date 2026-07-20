@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import React from "react";
+import React, { Suspense } from "react";
 import "./globals.css";
 import { AuthProvider } from "../context/AuthContext";
 import AppShell from "../components/AppShell";
+import ReferralCapture from "../components/ReferralCapture";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { am } from "../constants/amharic";
@@ -30,6 +31,9 @@ export default function RootLayout({
     <html lang="am">
       <body className="antialiased">
         <AuthProvider>
+          <Suspense fallback={null}>
+            <ReferralCapture />
+          </Suspense>
           <AppShell>{children}</AppShell>
           <ToastContainer
             position="top-center"
