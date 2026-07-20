@@ -75,6 +75,21 @@ export const authClient = {
       }),
   },
 
+  /** Phone digits as username (e.g. 251912345678) + password — no OTP */
+  signIn: {
+    username: async ({
+      username,
+      password,
+    }: {
+      username: string;
+      password: string;
+    }) =>
+      authFetch<{ user?: { id: string }; token?: string }>("/sign-in/username", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      }),
+  },
+
   getSession: async () =>
     authFetch<{ user?: { id: string }; session?: unknown }>("/get-session", {
       method: "GET",

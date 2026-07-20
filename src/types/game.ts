@@ -83,6 +83,8 @@ export interface User {
   registered: boolean;
   balance: number; // Decimal -> number
   welcomeBonusClaimed?: boolean;
+  /** False until signup completes password step (phone+password login) */
+  hasPassword?: boolean;
   isActive?: boolean;
   role?: 'ADMIN' | 'OPERATOR' | 'USER' | string;
   createdAt?: string | Date;

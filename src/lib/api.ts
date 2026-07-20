@@ -140,6 +140,15 @@ class ApiClient {
     });
   }
 
+  /** After OTP signup — set password for future phone+password logins */
+  async setPassword(password: string): Promise<ApiResponse<{ user: import('../types/game').UserSafeType }>> {
+    return this.request<{ user: import('../types/game').UserSafeType }>("/api/me/set-password", {
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ password }),
+    });
+  }
+
   async getProfile(): Promise<ApiResponse<Record<string, unknown>>> {
     return this.request("/api/profile", {
       method: "GET",

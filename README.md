@@ -21,6 +21,8 @@ BACKEND_URL=https://real-bingoweb-backend.onrender.com
 NEXT_PUBLIC_API_URL=https://real-bingoweb-backend.onrender.com
 ```
 
+**Auth:** Login = phone + password. Signup = phone → OTP → set password.
+
 OTP in local dev: check the **backend console** for `[auth] OTP issued...` when `SMS_PROVIDER=console`.
 
 ## How the app talks to the API
@@ -33,7 +35,7 @@ OTP in local dev: check the **backend console** for `[auth] OTP issued...` when 
 
 | Path | Screen |
 |------|--------|
-| `/login` | Phone + OTP |
+| `/login` | Login (phone + password) / Signup (OTP then password) |
 | `/` | Play / rooms |
 | `/cards` | Pick cartela |
 | `/game` | Live bingo |

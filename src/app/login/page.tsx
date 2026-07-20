@@ -3,6 +3,7 @@
 import React, { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "../../lib/auth-client";
+import { apiClient } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import { am } from "../../constants/amharic";
 
@@ -15,29 +16,115 @@ function normalizeEthiopianPhone(input: string): string {
   return digits;
 }
 
+function phoneToUsername(e164: string): string {
+  return e164.replace(/\D/g, "");
+}
+
+type Mode = "login" | "signup";
+type SignupStep = "phone" | "otp" | "password";
+
 export default function LoginPage() {
   const router = useRouter();
-  const { refreshUser, setUser, status } = useAuth();
-  const [step, setStep] = useState<"phone" | "otp">("phone");
+  const { refreshUser, setUser, status, user } = useAuth();
+  const [mode, setMode] = useState<Mode>("login");
+  const [signupStep, setSignupStep] = useState<SignupStep>("phone");
   const [national, setNational] = useState("");
   const [phoneE164, setPhoneE164] = useState("");
   const [otp, setOtp] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [resendIn, setResendIn] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  const needsPassword = status === "authenticated" && user?.hasPassword === false;
+
   useEffect(() => {
-    if (status === "authenticated") {
+    // AuthContext keeps us on /login when hasPassword is false
+    if (needsPassword) {
+      setMode("signup");
+      setSignupStep("password");
+      setInfo(am.setPasswordHint);
+      if (user?.phoneNumber) setPhoneE164(user.phoneNumber);
+    }
+  }, [needsPassword, user?.phoneNumber]);
+
+  useEffect(() => {
+    // Fully signed-in users leave login (AuthContext also redirects)
+    if (status === "authenticated" && user?.hasPassword !== false) {
       router.replace("/");
     }
-  }, [status, router]);
+  }, [status, user?.hasPassword, router]);
 
   useEffect(() => {
     if (resendIn <= 0) return;
     const t = window.setTimeout(() => setResendIn((s) => s - 1), 1000);
     return () => window.clearTimeout(t);
   }, [resendIn]);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setSignupStep("phone");
+    setOtp("");
+    setPassword("");
+    setConfirmPassword("");
+    setError(null);
+    setInfo(null);
+  };
+
+  const finishAuth = async () => {
+    let user = await refreshUser();
+    for (let i = 0; i < 6 && user; i++) {
+      const hasBonus =
+        Number(user.balance ?? 0) >= 10 || !!user.welcomeBonusClaimed;
+      if (hasBonus && Number(user.balance ?? 0) > 0) break;
+      await new Promise((r) => setTimeout(r, 350));
+      user = (await refreshUser()) || user;
+    }
+    if (!user) {
+      setError(am.sessionCreateFailed);
+      return false;
+    }
+    router.replace("/");
+    return true;
+  };
+
+  const loginWithPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+
+    const formatted = normalizeEthiopianPhone(national.trim());
+    if (!formatted.startsWith("+251") || formatted.length < 13) {
+      setError(am.invalidPhone);
+      return;
+    }
+    if (!password) {
+      setError(am.passwordRequired);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const username = phoneToUsername(formatted);
+      const { error: signError } = await authClient.signIn.username({
+        username,
+        password,
+      });
+      if (signError) {
+        setError(am.loginFailed);
+        setInfo(am.loginNoPasswordHint);
+        return;
+      }
+      await finishAuth();
+    } catch (err) {
+      console.error(err);
+      setError(am.loginFailed);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const sendOtp = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -60,7 +147,7 @@ export default function LoginPage() {
         return;
       }
       setPhoneE164(formatted);
-      setStep("otp");
+      setSignupStep("otp");
       setResendIn(60);
       setInfo(am.otpSentHint);
     } catch (err) {
@@ -86,16 +173,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Prefer loading wallet profile; fall back to verify payload
-      // OTP callback may still be writing the welcome bonus — poll briefly
+      // Session cookie set — next step is create password
       let user = await refreshUser();
-      for (let i = 0; i < 6 && user; i++) {
-        const hasBonus =
-          Number(user.balance ?? 0) >= 10 || !!user.welcomeBonusClaimed;
-        if (hasBonus && Number(user.balance ?? 0) > 0) break;
-        await new Promise((r) => setTimeout(r, 350));
-        user = (await refreshUser()) || user;
-      }
       if (!user && data?.user?.id) {
         await new Promise((r) => setTimeout(r, 400));
         user = await refreshUser();
@@ -110,17 +189,15 @@ export default function LoginPage() {
           registered: true,
           balance: 0,
           telegramId: null,
+          hasPassword: false,
         });
-        // Still go home — /api/me will repair bonus on next refresh
-        router.replace("/");
-        return;
+      } else if (user) {
+        setUser({ ...user, hasPassword: false });
       }
-      if (!user) {
-        setError(am.sessionCreateFailed);
-        return;
-      }
-
-      router.replace("/");
+      setPassword("");
+      setConfirmPassword("");
+      setSignupStep("password");
+      setInfo(am.setPasswordHint);
     } catch (err) {
       console.error(err);
       setError(am.otpInvalid);
@@ -128,6 +205,47 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  const createPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+
+    if (password.length < 6) {
+      setError(am.passwordTooShort);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError(am.passwordMismatch);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await apiClient.setPassword(password);
+      if (!res.success) {
+        setError(res.error || am.setPasswordFailed);
+        return;
+      }
+      if (res.data?.user) {
+        setUser(res.data.user);
+      }
+      await finishAuth();
+    } catch (err) {
+      console.error(err);
+      setError(am.setPasswordFailed);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const title = mode === "login" ? am.loginTitle : am.signupTitle;
+  const subtitle =
+    mode === "login"
+      ? am.loginSubtitle
+      : signupStep === "password"
+        ? am.setPasswordTitle
+        : am.signupSubtitle;
 
   return (
     <div className="min-h-screen bg-brand-bg text-white relative overflow-hidden">
@@ -145,12 +263,80 @@ export default function LoginPage() {
             <p className="text-brand-accent text-xs font-black tracking-[0.35em] uppercase mb-3">
               Winner Bingo
             </p>
-            <h1 className="text-3xl font-black tracking-tight mb-2">{am.loginTitle}</h1>
-            <p className="text-sm text-gray-400 leading-relaxed">{am.loginSubtitle}</p>
+            <h1 className="text-3xl font-black tracking-tight mb-2">{title}</h1>
+            <p className="text-sm text-gray-400 leading-relaxed">{subtitle}</p>
           </div>
 
           <div className="bg-white/[0.04] border border-white/10 rounded-3xl p-6 backdrop-blur-xl shadow-2xl">
-            {step === "phone" ? (
+            {!(mode === "signup" && signupStep === "password") && (
+              <div className="grid grid-cols-2 gap-2 mb-6 p-1 rounded-2xl bg-black/30 border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => switchMode("login")}
+                  className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition ${
+                    mode === "login"
+                      ? "bg-brand-primary text-white"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {am.tabLogin}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMode("signup")}
+                  className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition ${
+                    mode === "signup"
+                      ? "bg-brand-primary text-white"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {am.tabSignup}
+                </button>
+              </div>
+            )}
+
+            {mode === "login" && (
+              <form onSubmit={loginWithPassword} className="space-y-4">
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  {am.phoneLabel}
+                </label>
+                <div className="flex gap-2">
+                  <div className="rounded-2xl bg-black/30 border border-white/10 px-3 py-3 text-sm text-gray-400 font-bold">
+                    +251
+                  </div>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    autoComplete="tel-national"
+                    placeholder="912345678"
+                    value={national}
+                    onChange={(e) =>
+                      setNational(e.target.value.replace(/[^\d]/g, "").slice(0, 10))
+                    }
+                    className="flex-1 rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
+                  />
+                </div>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  {am.passwordLabel}
+                </label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-2xl bg-brand-primary py-3.5 text-sm font-black uppercase tracking-widest disabled:opacity-50 active:scale-[0.98] transition"
+                >
+                  {loading ? am.loggingIn : am.loginButton}
+                </button>
+              </form>
+            )}
+
+            {mode === "signup" && signupStep === "phone" && (
               <form onSubmit={sendOtp} className="space-y-4">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
                   {am.phoneLabel}
@@ -165,7 +351,9 @@ export default function LoginPage() {
                     autoComplete="tel-national"
                     placeholder="912345678"
                     value={national}
-                    onChange={(e) => setNational(e.target.value.replace(/[^\d]/g, "").slice(0, 10))}
+                    onChange={(e) =>
+                      setNational(e.target.value.replace(/[^\d]/g, "").slice(0, 10))
+                    }
                     className="flex-1 rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
                   />
                 </div>
@@ -177,7 +365,9 @@ export default function LoginPage() {
                   {loading ? am.sendingOtp : am.sendOtp}
                 </button>
               </form>
-            ) : (
+            )}
+
+            {mode === "signup" && signupStep === "otp" && (
               <form onSubmit={verifyOtp} className="space-y-4">
                 <p className="text-sm text-gray-300 text-center">
                   {am.otpSentTo}{" "}
@@ -207,7 +397,7 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setStep("phone");
+                      setSignupStep("phone");
                       setOtp("");
                       setError(null);
                       setInfo(null);
@@ -225,6 +415,41 @@ export default function LoginPage() {
                     {resendIn > 0 ? am.resendIn(resendIn) : am.resendOtp}
                   </button>
                 </div>
+              </form>
+            )}
+
+            {mode === "signup" && signupStep === "password" && (
+              <form onSubmit={createPassword} className="space-y-4">
+                <p className="text-sm text-gray-300 text-center leading-relaxed">
+                  {am.setPasswordHint}
+                </p>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  {am.passwordLabel}
+                </label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
+                />
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
+                  {am.confirmPasswordLabel}
+                </label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-2xl bg-brand-primary py-3.5 text-sm font-black uppercase tracking-widest disabled:opacity-50 active:scale-[0.98] transition"
+                >
+                  {loading ? am.creatingAccount : am.createAccount}
+                </button>
               </form>
             )}
 

@@ -42,7 +42,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   const setUser = useCallback((next: UserSafeType | null) => {
-    setUserState(next);
+    setUserState((prev) => {
+      if (!next) return null;
+      return {
+        ...next,
+        // Keep password flag if a partial update omitted it
+        hasPassword:
+          typeof next.hasPassword === "boolean"
+            ? next.hasPassword
+            : prev?.hasPassword,
+      };
+    });
     setStatus(next ? "authenticated" : "unauthenticated");
   }, []);
 
@@ -110,13 +120,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (status === "loading") return;
 
     const isPublic = PUBLIC_PATHS.has(pathname);
+    // OTP verified but password not set yet — stay on /login to finish signup
+    const needsPassword =
+      status === "authenticated" && user?.hasPassword === false;
+
+    if (needsPassword && pathname !== "/login") {
+      router.replace("/login");
+      return;
+    }
 
     if (status === "unauthenticated" && !isPublic) {
       router.replace("/login");
-    } else if (status === "authenticated" && pathname === "/login") {
+    } else if (
+      status === "authenticated" &&
+      pathname === "/login" &&
+      !needsPassword
+    ) {
       router.replace("/");
     }
-  }, [status, pathname, router]);
+  }, [status, pathname, router, user?.hasPassword]);
 
   const value = useMemo(
     () => ({ status, user, refreshUser, setUser, signOut }),
