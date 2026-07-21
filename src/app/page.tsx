@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Wallet, RefreshCw } from 'lucide-react';
+import { Wallet, RefreshCw, Lock } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 import { useGames } from '../context/gameContext';
 import { useAuth } from '../context/AuthContext';
@@ -23,7 +23,8 @@ export default function PlayPage() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   const { connected } = useSocket();
-  const { refreshUser, user: authUser } = useAuth();
+  const { refreshUser, user: authUser, status: authStatus } = useAuth();
+  const isGuest = authStatus !== 'authenticated';
   const { user, games, gameLoading, userLoading, error, watchGame } = useGames() as {
     user: UserSafeType | null;
     games: Record<number, GameSession>;
@@ -34,7 +35,7 @@ export default function PlayPage() {
   };
 
   const player = user || authUser;
-  const showNameBanner = needsDisplayName(player);
+  const showNameBanner = !isGuest && needsDisplayName(player);
 
   useEffect(() => {
     if (player?.balance != null) {
@@ -56,26 +57,38 @@ export default function PlayPage() {
   };
 
   useEffect(() => {
-    if (player && games) {
-      const activeGame = Object.values(games).find(
-        (game) =>
-          game.players.some(
-            (p) =>
-              p.id === player.id ||
-              (!!player.telegramId &&
-                (p.id === player.telegramId || p.telegramId === player.telegramId))
-          ) && game.status !== 'finished'
-      );
-
-      if (activeGame) {
-        setRejoinData({ gameId: activeGame.id, bet: activeGame.bet });
-      } else {
-        setRejoinData(null);
-      }
+    if (isGuest || !player || !games) {
+      setRejoinData(null);
+      return;
     }
-  }, [player, games]);
+
+    const activeGame = Object.values(games).find(
+      (game) =>
+        game.players.some(
+          (p) =>
+            p.id === player.id ||
+            (!!player.telegramId &&
+              (p.id === player.telegramId || p.telegramId === player.telegramId))
+        ) && game.status !== 'finished'
+    );
+
+    if (activeGame) {
+      setRejoinData({ gameId: activeGame.id, bet: activeGame.bet });
+    } else {
+      setRejoinData(null);
+    }
+  }, [isGuest, player, games]);
+
+  const goToLogin = () => {
+    router.push('/login');
+  };
 
   const handleSelectBet = (gameId: string, bet: number) => {
+    if (isGuest) {
+      goToLogin();
+      return;
+    }
+
     setJoiningGame(true);
     sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ gameId, bet }));
 
@@ -92,9 +105,35 @@ export default function PlayPage() {
 
   return (
     <div className="flex-1 min-h-screen bg-brand-bg text-white flex flex-col">
-      <TopBar subtitle={am.playSubtitle} />
+      <TopBar
+        title={isGuest ? am.guestLobbyTitle : undefined}
+        subtitle={isGuest ? am.guestLobbySubtitle : am.playSubtitle}
+      />
 
       <div className="flex-1 overflow-y-auto scrollbar-hide">
+        {isGuest && (
+          <div className="px-4 pt-4">
+            <div className="rounded-2xl border border-brand-accent/30 bg-gradient-to-br from-brand-accent/15 to-brand-primary/10 px-4 py-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-brand-accent/20 border border-brand-accent/30 flex items-center justify-center shrink-0">
+                  <Lock className="w-5 h-5 text-brand-accent" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-brand-accent">{am.guestCtaTitle}</p>
+                  <p className="text-xs text-gray-300 mt-1 leading-relaxed">{am.guestCtaBody}</p>
+                  <button
+                    type="button"
+                    onClick={goToLogin}
+                    className="mt-3 w-full sm:w-auto bg-brand-accent text-brand-bg font-black text-xs uppercase tracking-widest px-4 py-2.5 rounded-xl hover:brightness-110 transition"
+                  >
+                    {am.guestCtaButton}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showNameBanner && (
           <div className="px-4 pt-4">
             <Link
@@ -109,48 +148,50 @@ export default function PlayPage() {
           </div>
         )}
 
-        <div className="px-4 py-4">
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-center justify-between shadow-2xl relative overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-            <div className="relative z-10 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-brand-accent/10 border border-brand-accent/20 flex items-center justify-center">
-                <Wallet className="w-5 h-5 text-brand-accent" />
+        {!isGuest && (
+          <div className="px-4 py-4">
+            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-center justify-between shadow-2xl relative overflow-hidden group">
+              <div className="absolute inset-0 bg-gradient-to-br from-brand-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <div className="relative z-10 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-brand-accent/10 border border-brand-accent/20 flex items-center justify-center">
+                  <Wallet className="w-5 h-5 text-brand-accent" />
+                </div>
+                <div>
+                  <span className="text-gray-400 text-xs font-bold uppercase tracking-wider block">
+                    {am.walletBalance}
+                  </span>
+                  <span className="font-black text-white text-lg">
+                    {userLoading || balanceRefreshing ? (
+                      <span className="inline-block w-20 h-6 bg-white/10 rounded animate-pulse" />
+                    ) : (
+                      `${Number(walletBalance ?? player?.balance ?? 0).toLocaleString()} ${am.etb}`
+                    )}
+                  </span>
+                </div>
               </div>
-              <div>
-                <span className="text-gray-400 text-xs font-bold uppercase tracking-wider block">
-                  {am.walletBalance}
-                </span>
-                <span className="font-black text-white text-lg">
-                  {userLoading || balanceRefreshing ? (
-                    <span className="inline-block w-20 h-6 bg-white/10 rounded animate-pulse" />
-                  ) : (
-                    `${Number(walletBalance ?? player?.balance ?? 0).toLocaleString()} ${am.etb}`
-                  )}
-                </span>
+              <div className="relative z-10 flex items-center gap-2">
+                <button
+                  onClick={handleRefreshBalance}
+                  disabled={balanceRefreshing || userLoading}
+                  className="bg-white/5 hover:bg-white/10 p-2 rounded-xl transition-colors border border-white/5 disabled:opacity-50"
+                  aria-label={am.refresh}
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 text-brand-accent ${balanceRefreshing ? 'animate-spin' : ''}`}
+                  />
+                </button>
+                <button
+                  onClick={() => router.push('/wallet')}
+                  className="bg-brand-primary/20 hover:bg-brand-primary/30 px-3 py-2 rounded-xl transition-colors border border-brand-primary/30 text-xs font-black uppercase tracking-widest text-brand-accent"
+                >
+                  {am.walletTitle}
+                </button>
               </div>
-            </div>
-            <div className="relative z-10 flex items-center gap-2">
-              <button
-                onClick={handleRefreshBalance}
-                disabled={balanceRefreshing || userLoading}
-                className="bg-white/5 hover:bg-white/10 p-2 rounded-xl transition-colors border border-white/5 disabled:opacity-50"
-                aria-label={am.refresh}
-              >
-                <RefreshCw
-                  className={`w-4 h-4 text-brand-accent ${balanceRefreshing ? 'animate-spin' : ''}`}
-                />
-              </button>
-              <button
-                onClick={() => router.push('/wallet')}
-                className="bg-brand-primary/20 hover:bg-brand-primary/30 px-3 py-2 rounded-xl transition-colors border border-brand-primary/30 text-xs font-black uppercase tracking-widest text-brand-accent"
-              >
-                {am.walletTitle}
-              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="px-4">
+        <div className={`px-4 ${isGuest ? 'pt-4' : ''}`}>
           <h2 className="text-lg font-black tracking-tight mb-3">{am.playHeadline}</h2>
 
           {error && (
@@ -195,13 +236,20 @@ export default function PlayPage() {
                   const status = game?.status || 'offline';
                   const isOffline = !game;
                   const balance = Number(walletBalance ?? player?.balance ?? 0);
-                  const isLowBalance = !isOffline && balance < bet;
+                  const isLowBalance = !isGuest && !isOffline && balance < bet;
                   const isActiveGame =
                     status === 'started' || !!game?.countdown?.running;
                   const derash =
                     game?.possibleWin ??
                     (playersCount > 0 ? Math.floor(playersCount * bet * 0.8) : 0);
                   const canPlay = status !== 'finished' && !isOffline;
+                  const playLabel = isGuest
+                    ? am.registerToPlay
+                    : status === 'finished'
+                      ? am.finalized
+                      : isOffline
+                        ? am.unavailable
+                        : am.play;
 
                   return (
                     <div
@@ -248,15 +296,13 @@ export default function PlayPage() {
 
                       <div className="flex justify-end">
                         <button
-                          onClick={() => canPlay && handleSelectBet(id, bet)}
-                          disabled={!canPlay || joiningGame}
-                          className={canPlay ? 'lobby-play-btn is-ready' : 'lobby-play-btn'}
+                          onClick={() => (canPlay || isGuest) && handleSelectBet(id, bet)}
+                          disabled={isGuest ? false : !canPlay || joiningGame}
+                          className={
+                            isGuest || canPlay ? 'lobby-play-btn is-ready' : 'lobby-play-btn'
+                          }
                         >
-                          {status === 'finished'
-                            ? am.finalized
-                            : isOffline
-                              ? am.unavailable
-                              : am.play}
+                          {playLabel}
                         </button>
                       </div>
                     </div>

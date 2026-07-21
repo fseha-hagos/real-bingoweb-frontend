@@ -11,6 +11,12 @@ export const am = {
   // Home play
   playHeadline: "ጨዋታ ይምረጡ",
   playSubtitle: "ውርርድ ይምረጡ፣ ካርቴላ ይውሰዱ፣ ቢንጎ ይውጡ",
+  guestLobbyTitle: "ቀጥታ ጨዋታዎች",
+  guestLobbySubtitle: "አሁን የሚጫወቱትን ይመልከቱ — ለመጫወት ይመዝገቡ",
+  guestCtaTitle: "ለመጫወት ይመዝገቡ",
+  guestCtaBody: "ቀጥታ ደረሽ፣ ተጫዋቾች እና ጨዋታዎችን ይመልከቱ። መለያ ይፍጠሩና ያሸንፉ!",
+  guestCtaButton: "ተመዝገብ / ግባ",
+  registerToPlay: "ተመዝገብ",
   helloPlayer: (name: string) => `ሰላም፣ ${name}`,
   setYourName: "ስምዎን ያስገቡ",
   setYourNameHint: "በጨዋታ ውስጥ እንዲታዩ የሚፈልጉትን ስም ይምረጡ",
@@ -175,7 +181,7 @@ export const am = {
   openInTelegram: "በቴሌግራም ይክፈቱ",
 
   // Auth / login
-  checkingSession: "ክፍለ ጊዜ በመፈተሽ ላይ...",
+  checkingSession: "በመፈተሽ ላይ...",
   redirectingLogin: "ወደ መግቢያ በመሄድ ላይ...",
   loginTitle: "ይግቡ",
   loginSubtitle: "ስልክ ቁጥር እና የይለፍ ቃል ያስገቡ",
@@ -212,7 +218,7 @@ export const am = {
   otpSendFailed: "ኮድ መላክ አልተሳካም። እንደገና ይሞክሩ።",
   otpInvalid: "የማረጋገጫ ኮድ ትክክል አይደለም።",
   setPasswordFailed: "የይለፍ ቃል ማስቀመጥ አልተሳካም። እንደገና ይሞክሩ።",
-  sessionCreateFailed: "ኮዱ ትክክል ነው፣ ግን ክፍለ ጊዜ መፍጠር አልተሳካም። ገጹን ያድሱና እንደገና ይሞክሩ።",
+  sessionCreateFailed: "መፍጠር አልተሳካም። ገጹን ያድሱና እንደገና ይሞክሩ።",
   signOut: "ውጣ",
 
   // Wallet page

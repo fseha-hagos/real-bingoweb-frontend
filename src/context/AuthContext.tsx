@@ -27,7 +27,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const PUBLIC_PATHS = new Set(["/login"]);
+// Lobby is public so guests see live games and get motivated to register
+const PUBLIC_PATHS = new Set(["/", "/login"]);
 
 function hasSessionUser(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = new Set(["/login"]);
+// Guests can browse the live lobby; play/wallet/profile still require auth
+const PUBLIC_PATHS = new Set(["/", "/login"]);
 
 const APP_PATHS = new Set([
   "/",
