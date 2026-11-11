@@ -113,12 +113,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (tgPayload) {
       try {
         const tgRes = await apiClient.verifyTelegramUser(tgPayload);
-        const tgUser = (tgRes.data?.user || (tgRes.data as any)?.data?.user) as UserSafeType | undefined;
+        const tgUser = tgRes.data?.user || tgRes.data?.data?.user;
+        const tgToken = tgRes.data?.token || tgRes.data?.data?.token;
         if (tgRes.success && tgUser) {
           const authedUser: UserSafeType = { ...tgUser, hasPassword: true };
-          if ((tgRes.data as any)?.token) {
+          if (tgToken) {
             try {
-              localStorage.setItem("tg_session_token", (tgRes.data as any).token);
+              localStorage.setItem("tg_session_token", tgToken);
             } catch { }
           }
           setUserState(authedUser);
@@ -169,15 +170,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const tgRes = await apiClient.verifyTelegramUser(tgPayload);
           if (cancelled) return;
 
-          const tgUser = (tgRes.data?.user || (tgRes.data as any)?.data?.user) as UserSafeType | undefined;
+          const tgUser = tgRes.data?.user || tgRes.data?.data?.user;
+          const tgToken = tgRes.data?.token || tgRes.data?.data?.token;
           if (tgRes.success && tgUser) {
             const authedUser: UserSafeType = {
               ...tgUser,
               hasPassword: true, // Telegram users never need password entry
             };
-            if ((tgRes.data as any)?.token) {
+            if (tgToken) {
               try {
-                localStorage.setItem("tg_session_token", (tgRes.data as any).token);
+                localStorage.setItem("tg_session_token", tgToken);
               } catch { }
             }
             setUserState(authedUser);

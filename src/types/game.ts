@@ -145,20 +145,17 @@ export interface BingoWinEventPayload {
 
 
 export interface VerifyResponse {
-  success: boolean;
+  success?: boolean;
   message?: string;
   error?: string;
-  data?: {
-    ok: boolean;
-    user?: UserSafeType;
-  };
-
-
-}
-
-export interface VerifyResponse {
-  ok: boolean;
+  ok?: boolean;
   user?: UserSafeType;
+  token?: string;
+  data?: {
+    ok?: boolean;
+    user?: UserSafeType;
+    token?: string;
+  };
 }
 
 export interface MarkNumberRequest {
