@@ -39,7 +39,10 @@ export default function CardsPage() {
     const storedGameData = sessionStorage.getItem(SELECTED_GAME_DATA);
 
     if (!storedGameData) {
-      router.replace('/');
+      // Default to 10 Birr stake so user stays on cards page instead of getting kicked out
+      const defaultBet = 10;
+      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: defaultBet }));
+      watchGame(defaultBet);
       return;
     }
 
@@ -48,10 +51,14 @@ export default function CardsPage() {
       if (parsed.bet) {
         watchGame(parsed.bet);
       } else {
-        router.replace('/');
+        const defaultBet = 10;
+        sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: defaultBet }));
+        watchGame(defaultBet);
       }
     } catch {
-      router.replace('/');
+      const defaultBet = 10;
+      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: defaultBet }));
+      watchGame(defaultBet);
     }
   }, [router, watchGame]);
 
@@ -180,8 +187,8 @@ export default function CardsPage() {
       {/* Live sync banner */}
       <div
         className={`sticky top-0 z-50 text-center py-2 text-xs font-black tracking-widest uppercase transition-colors duration-500 ${connected
-            ? 'bg-emerald-500/10 text-emerald-400 border-b border-emerald-500/20 backdrop-blur-md'
-            : 'bg-rose-500/10 text-rose-400 border-b border-rose-500/20 backdrop-blur-md'
+          ? 'bg-emerald-500/10 text-emerald-400 border-b border-emerald-500/20 backdrop-blur-md'
+          : 'bg-rose-500/10 text-rose-400 border-b border-rose-500/20 backdrop-blur-md'
           }`}
       >
         <div className="flex items-center justify-center gap-2">
@@ -284,8 +291,8 @@ export default function CardsPage() {
                 type="button"
                 onClick={() => setPreviewCardNumber(num)}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black border transition ${previewCardNumber === num
-                    ? 'bg-brand-primary text-white border-brand-primary'
-                    : 'bg-white/10 text-gray-300 border-white/10 hover:bg-white/15'
+                  ? 'bg-brand-primary text-white border-brand-primary'
+                  : 'bg-white/10 text-gray-300 border-white/10 hover:bg-white/15'
                   }`}
               >
                 <span>#{num}</span>

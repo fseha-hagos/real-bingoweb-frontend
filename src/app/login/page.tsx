@@ -43,8 +43,53 @@ export default function LoginPage() {
   const [resendIn, setResendIn] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [isTelegramInApp, setIsTelegramInApp] = useState(false);
+  const [showDirectButton, setShowDirectButton] = useState(false);
 
-  const needsPassword = status === "authenticated" && user?.hasPassword === false;
+  const isTelegramUser = Boolean(user?.telegramId);
+  const needsPassword =
+    status === "authenticated" && user?.hasPassword === false && !isTelegramUser;
+
+  const getTargetDestination = () => {
+    if (typeof window === "undefined") return "/";
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const queryBet = params.get("bet") || params.get("stake");
+      if (queryBet) return `/cards?bet=${queryBet}`;
+      const stored = sessionStorage.getItem("selected_game");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.bet) return `/cards?bet=${parsed.bet}`;
+      }
+    } catch {}
+    return isTelegramInApp || isTelegramUser ? "/cards?bet=10" : "/";
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const isTg = Boolean(
+        window.Telegram?.WebApp?.initData ||
+        window.Telegram?.WebApp?.initDataUnsafe?.user?.id ||
+        window.location.search.includes("tgId") ||
+        window.location.hash.includes("tgWebAppData")
+      );
+      if (isTg) {
+        setIsTelegramInApp(true);
+        refreshUser().then((u) => {
+          if (u) {
+            router.replace(getTargetDestination());
+          }
+        });
+      }
+    }
+  }, [refreshUser, router]);
+
+  useEffect(() => {
+    if (isTelegramInApp && status !== "authenticated") {
+      const timer = setTimeout(() => setShowDirectButton(true), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [isTelegramInApp, status]);
 
   useEffect(() => {
     // AuthContext keeps us on /login when hasPassword is false
@@ -58,11 +103,11 @@ export default function LoginPage() {
   }, [needsPassword, user?.phoneNumber]);
 
   useEffect(() => {
-    // Fully signed-in users leave login
-    if (status === "authenticated" && user?.hasPassword !== false) {
-      router.replace("/");
+    // Fully signed-in users (including any Telegram authenticated user) leave login
+    if (status === "authenticated" && !needsPassword) {
+      router.replace(getTargetDestination());
     }
-  }, [status, user?.hasPassword, router]);
+  }, [status, needsPassword, router]);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -327,6 +372,28 @@ export default function LoginPage() {
         ? am.setPasswordTitle
         : am.signupSubtitle;
 
+  if (isTelegramInApp && status !== "authenticated") {
+    return (
+      <div className="min-h-screen bg-brand-bg text-white flex flex-col items-center justify-center px-6">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-primary/15 border border-brand-primary/30 mb-5 animate-pulse">
+          <span className="text-2xl font-black text-brand-accent">WB</span>
+        </div>
+        <div className="w-10 h-10 border-2 border-brand-primary border-t-transparent rounded-full animate-spin mb-4" />
+        <h2 className="text-base font-black text-white mb-1">በቴሌግራም በመግባት ላይ...</h2>
+        <p className="text-xs text-gray-400 mb-6">Verifying Telegram authentication...</p>
+        {showDirectButton && (
+          <button
+            type="button"
+            onClick={() => router.replace(getTargetDestination())}
+            className="rounded-2xl bg-brand-primary px-6 py-3 text-sm font-black uppercase tracking-wider text-white hover:bg-brand-primary/90 transition shadow-lg active:scale-95"
+          >
+            🎮 ወደ ጨዋታው ግባ (Enter Game)
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-brand-bg text-white relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0">
@@ -353,22 +420,20 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => switchMode("login")}
-                  className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition ${
-                    mode === "login"
+                  className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition ${mode === "login"
                       ? "bg-brand-primary text-white"
                       : "text-gray-400 hover:text-white"
-                  }`}
+                    }`}
                 >
                   {am.tabLogin}
                 </button>
                 <button
                   type="button"
                   onClick={() => switchMode("signup")}
-                  className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition ${
-                    mode === "signup"
+                  className={`rounded-xl py-2.5 text-xs font-black uppercase tracking-widest transition ${mode === "signup"
                       ? "bg-brand-primary text-white"
                       : "text-gray-400 hover:text-white"
-                  }`}
+                    }`}
                 >
                   {am.tabSignup}
                 </button>

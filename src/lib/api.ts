@@ -51,12 +51,29 @@ class ApiClient {
 
     try {
       const url = `${resolveRequestBaseUrl(endpoint)}${endpoint}`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+        ...(options.headers as Record<string, string>),
+      };
+
+      if (typeof window !== "undefined") {
+        try {
+          const tgInitData = window.Telegram?.WebApp?.initData;
+          if (tgInitData && !headers['x-telegram-init-data']) {
+            headers['x-telegram-init-data'] = tgInitData;
+          }
+          const tgToken = localStorage.getItem("tg_session_token");
+          if (tgToken && !headers['Authorization'] && !headers['authorization']) {
+            headers['Authorization'] = `Bearer ${tgToken}`;
+          }
+        } catch {
+          // ignore storage or window access errors
+        }
+      }
+
       const config: RequestInit = {
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
-          ...options.headers,
-        },
+        headers,
         credentials: 'include',
         ...options,
         signal: controller.signal,
@@ -242,11 +259,21 @@ class ApiClient {
     });
   }
 
-  // ✅ Verify Telegram WebApp User (legacy)
-  async verifyTelegramUser(initData: string): Promise<ApiResponse<VerifyResponse>> {
+  // ✅ Verify Telegram WebApp User seamlessly
+  async verifyTelegramUser(
+    payload:
+      | string
+      | {
+          telegramId?: string | number;
+          firstName?: string;
+          username?: string;
+          initData?: string;
+        }
+  ): Promise<ApiResponse<VerifyResponse>> {
+    const body = typeof payload === "string" ? { initData: payload } : payload;
     return this.request<VerifyResponse>("/api/verify-user", {
       method: "POST",
-      body: JSON.stringify({ initData }),
+      body: JSON.stringify(body),
     });
   }
 

@@ -34,12 +34,13 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
       (window.location.hostname === "localhost" ||
         window.location.hostname === "127.0.0.1");
 
-    // If running in local browser, prefer local backend 3001 unless specified
+    // If running on phone/ngrok/remote domain, connect to current origin so Next.js proxies
+    // socket requests cleanly without CORS or unreachable localhost port issues.
+    // If running in local browser, connect directly to local backend port 3001.
     const serverUrl =
-      envUrl ||
-      (isBrowserLocal
-        ? "http://localhost:3001"
-        : "https://real-bingoweb-backend.onrender.com");
+      typeof window !== "undefined" && !isBrowserLocal
+        ? window.location.origin
+        : (envUrl || "http://localhost:3001");
 
     console.log("🔌 Socket connecting to:", serverUrl);
     setConnectionStatus('connecting');
@@ -64,13 +65,14 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
 
     // Create socket with automatic reconnection options
     const socketInstance = io(serverUrl, {
+      path: "/socket.io",
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       withCredentials: true,
       query: query,
     });

@@ -27,8 +27,58 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Lobby is public so guests see live games and get motivated to register
-const PUBLIC_PATHS = new Set(["/", "/login"]);
+// Lobby and cards are public/accessible so Telegram 1-click players and guests can view without redirects
+const PUBLIC_PATHS = new Set(["/", "/login", "/cards"]);
+
+function getTelegramPayload(): {
+  telegramId?: string;
+  firstName?: string;
+  username?: string;
+  initData?: string;
+} | null {
+  if (typeof window === "undefined") return null;
+
+  // 1. Check window.Telegram?.WebApp
+  const unsafeUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  const rawInitData = window.Telegram?.WebApp?.initData;
+
+  // 2. Check URL search params (?tgId=...)
+  const searchParams = new URLSearchParams(window.location.search);
+  const queryTgId = searchParams.get("tgId") || searchParams.get("telegramId");
+
+  // 3. Check hash params
+  let hashTgId: string | null = null;
+  try {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (hash) {
+      const hashParams = new URLSearchParams(hash);
+      const rawTgWeb = hashParams.get("tgWebAppData");
+      if (rawTgWeb) {
+        const innerParams = new URLSearchParams(decodeURIComponent(rawTgWeb));
+        const userJson = innerParams.get("user");
+        if (userJson) {
+          const parsed = JSON.parse(userJson);
+          if (parsed.id) hashTgId = String(parsed.id);
+        }
+      }
+    }
+  } catch { }
+
+  const telegramId = unsafeUser?.id
+    ? String(unsafeUser.id)
+    : (queryTgId || hashTgId);
+
+  if (telegramId || rawInitData) {
+    return {
+      telegramId: telegramId || undefined,
+      firstName: unsafeUser?.first_name,
+      username: unsafeUser?.username,
+      initData: rawInitData || undefined,
+    };
+  }
+
+  return null;
+}
 
 function hasSessionUser(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
@@ -58,9 +108,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
+    // 1. If inside Telegram, verify immediately
+    const tgPayload = getTelegramPayload();
+    if (tgPayload) {
+      try {
+        const tgRes = await apiClient.verifyTelegramUser(tgPayload);
+        const tgUser = (tgRes.data?.user || (tgRes.data as any)?.data?.user) as UserSafeType | undefined;
+        if (tgRes.success && tgUser) {
+          const authedUser: UserSafeType = { ...tgUser, hasPassword: true };
+          if ((tgRes.data as any)?.token) {
+            try {
+              localStorage.setItem("tg_session_token", (tgRes.data as any).token);
+            } catch { }
+          }
+          setUserState(authedUser);
+          setStatus("authenticated");
+          return authedUser;
+        }
+      } catch { }
+    }
+
     const res = await apiClient.getMe();
     if (res.success && res.data?.user) {
       const next = res.data.user as UserSafeType;
+      if (next.telegramId) next.hasPassword = true;
       setUserState(next);
       setStatus("authenticated");
       return next;
@@ -87,17 +158,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const boot = async () => {
       try {
-        // Prefer /api/me — validates session cookie against our DB user
+        // 1. Seamless Telegram authentication: auto-verify if launched from Telegram
+        const tgPayload = getTelegramPayload();
+        if (tgPayload) {
+          try {
+            window.Telegram?.WebApp?.ready?.();
+            window.Telegram?.WebApp?.expand?.();
+          } catch { }
+
+          const tgRes = await apiClient.verifyTelegramUser(tgPayload);
+          if (cancelled) return;
+
+          const tgUser = (tgRes.data?.user || (tgRes.data as any)?.data?.user) as UserSafeType | undefined;
+          if (tgRes.success && tgUser) {
+            const authedUser: UserSafeType = {
+              ...tgUser,
+              hasPassword: true, // Telegram users never need password entry
+            };
+            if ((tgRes.data as any)?.token) {
+              try {
+                localStorage.setItem("tg_session_token", (tgRes.data as any).token);
+              } catch { }
+            }
+            setUserState(authedUser);
+            setStatus("authenticated");
+            return;
+          }
+        }
+
+        // 2. Prefer /api/me — validates session cookie against our DB user
         const me = await apiClient.getMe();
         if (cancelled) return;
 
         if (me.success && me.data?.user) {
-          setUserState(me.data.user as UserSafeType);
+          const user = me.data.user as UserSafeType;
+          if (user.telegramId) {
+            user.hasPassword = true;
+          }
+          setUserState(user);
           setStatus("authenticated");
           return;
         }
 
-        // Fallback: Better Auth session endpoint
+        // 3. Fallback: Better Auth session endpoint
         const session = await authClient.getSession();
         if (cancelled) return;
 
@@ -121,25 +224,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (status === "loading") return;
 
     const isPublic = PUBLIC_PATHS.has(pathname);
-    // OTP verified but password not set yet — stay on /login to finish signup
+    const isTelegramUser = Boolean(user?.telegramId);
+    const hasTgContext =
+      typeof window !== "undefined" &&
+      Boolean(
+        window.Telegram?.WebApp?.initData ||
+        window.Telegram?.WebApp?.initDataUnsafe?.user?.id ||
+        window.location.search.includes("tgId") ||
+        window.location.hash.includes("tgWebAppData")
+      );
+
+    // OTP verified but password not set yet — stay on /login to finish signup (only for non-Telegram players)
     const needsPassword =
-      status === "authenticated" && user?.hasPassword === false;
+      status === "authenticated" && user?.hasPassword === false && !isTelegramUser;
 
     if (needsPassword && pathname !== "/login") {
       router.replace("/login");
       return;
     }
 
-    if (status === "unauthenticated" && !isPublic) {
+    // Telegram players are never bounced to /login
+    if (status === "unauthenticated" && !isPublic && !hasTgContext) {
       router.replace("/login");
     } else if (
       status === "authenticated" &&
       pathname === "/login" &&
       !needsPassword
     ) {
+      try {
+        const stored = sessionStorage.getItem("selected_game");
+        const parsed = stored ? JSON.parse(stored) : null;
+        if (parsed?.bet) {
+          router.replace(`/cards?bet=${parsed.bet}`);
+          return;
+        }
+      } catch { }
       router.replace("/");
     }
-  }, [status, pathname, router, user?.hasPassword]);
+  }, [status, pathname, router, user?.hasPassword, user?.telegramId]);
 
   const value = useMemo(
     () => ({ status, user, refreshUser, setUser, signOut }),
