@@ -112,8 +112,8 @@ export const authClient = {
         return { data: null, error: { message: data.error || "Registration failed" } };
       }
       return { data, error: null };
-    } catch (err: any) {
-      return { data: null, error: { message: err.message || "Network error" } };
+    } catch (err: unknown) {
+      return { data: null, error: { message: err instanceof Error ? err.message : "Network error" } };
     }
   },
 

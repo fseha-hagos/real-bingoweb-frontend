@@ -63,13 +63,6 @@ const BingoResult: React.FC<BingoResultProps> = ({
 
   const matchedCount = flattenedGrid.filter((n) => calledNumbers.includes(n)).length;
 
-  const bgGradient = won
-    ? "bg-gradient-to-br from-blue-900/90 to-blue-800/90"
-    : "bg-gradient-to-br from-red-900/90 to-red-800/90";
-
-  const borderColor = won ? "border-blue-500/50" : "border-red-500/50";
-  const titleColor = won ? "text-blue-200" : "text-red-200";
-
   const handlePlayAgain = () => {
 
     if (onPlayAgain) { onClose(); onPlayAgain(); }

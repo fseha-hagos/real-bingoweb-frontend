@@ -92,10 +92,12 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
       status: upstream.status,
       headers: resHeaders,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Proxy error:", err);
+    const message = err instanceof Error ? err.message : "Proxy error";
+    const stack = err instanceof Error ? err.stack : undefined;
     return NextResponse.json(
-      { success: false, error: err?.message || "Proxy error", stack: err?.stack },
+      { success: false, error: message, stack },
       { status: 500 }
     );
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { FormEvent, useEffect, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "../../lib/auth-client";
 import { apiClient } from "../../lib/api";
@@ -50,7 +50,7 @@ export default function LoginPage() {
   const needsPassword =
     status === "authenticated" && user?.hasPassword === false && !isTelegramUser;
 
-  const getTargetDestination = () => {
+  const getTargetDestination = useCallback(() => {
     if (typeof window === "undefined") return "/";
     try {
       const params = new URLSearchParams(window.location.search);
@@ -63,7 +63,7 @@ export default function LoginPage() {
       }
     } catch {}
     return isTelegramInApp || isTelegramUser ? "/cards?bet=10" : "/";
-  };
+  }, [isTelegramInApp, isTelegramUser]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -82,7 +82,7 @@ export default function LoginPage() {
         });
       }
     }
-  }, [refreshUser, router]);
+  }, [refreshUser, router, getTargetDestination]);
 
   useEffect(() => {
     if (isTelegramInApp && status !== "authenticated") {
@@ -107,7 +107,7 @@ export default function LoginPage() {
     if (status === "authenticated" && !needsPassword) {
       router.replace(getTargetDestination());
     }
-  }, [status, needsPassword, router]);
+  }, [status, needsPassword, router, getTargetDestination]);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -175,9 +175,10 @@ export default function LoginPage() {
         return;
       }
       await finishAuth();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err?.message || am.loginFailed);
+      const message = err instanceof Error ? err.message : am.loginFailed;
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -244,9 +245,10 @@ export default function LoginPage() {
       }
 
       await finishAuth();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err?.message || "Registration failed");
+      const message = err instanceof Error ? err.message : "Registration failed";
+      setError(message);
     } finally {
       setLoading(false);
     }
