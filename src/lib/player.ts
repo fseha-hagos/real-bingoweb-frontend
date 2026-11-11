@@ -13,6 +13,7 @@ export function getDisplayName(user: Partial<UserSafeType> | null | undefined): 
     // Skip phone-like / temp auth names
     if (/^\+?\d{8,}$/.test(trimmed)) continue;
     if (trimmed.includes("@bingo.local")) continue;
+    if (trimmed === "ተጫዋች") continue;
     return trimmed;
   }
 
@@ -23,15 +24,21 @@ export function getDisplayName(user: Partial<UserSafeType> | null | undefined): 
   return "ተጫዋች";
 }
 
+function isPlaceholderName(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    /^\+?\d{8,}$/.test(trimmed) ||
+    trimmed.includes("@bingo.local") ||
+    trimmed === "ተጫዋች"
+  );
+}
+
 export function needsDisplayName(user: Partial<UserSafeType> | null | undefined): boolean {
   if (!user) return true;
   const candidates = [user.firstName, user.username, user.name].filter(
     (v): v is string => typeof v === "string" && v.trim().length > 0
   );
-  return !candidates.some((c) => {
-    const trimmed = c.trim();
-    return !/^\+?\d{8,}$/.test(trimmed) && !trimmed.includes("@bingo.local");
-  });
+  return !candidates.some((c) => !isPlaceholderName(c));
 }
 
 export function getInitials(user: Partial<UserSafeType> | null | undefined): string {

@@ -44,7 +44,9 @@ export interface Player {
   telegramId?: string | null;
   socketId?: string;
   cardNumber?: number;
+  cardNumbers?: number[];
   card?: Cartela;
+  cards?: Cartela[];
   joinedAt?: string;
   isReady?: boolean;
   incorrectBingoClaims?: number;
@@ -82,6 +84,9 @@ export interface User {
   phoneNumber: string | null;
   registered: boolean;
   balance: number; // Decimal -> number
+  welcomeBonusClaimed?: boolean;
+  /** False until signup completes password step (phone+password login) */
+  hasPassword?: boolean;
   isActive?: boolean;
   role?: 'ADMIN' | 'OPERATOR' | 'USER' | string;
   createdAt?: string | Date;
@@ -99,7 +104,8 @@ export interface GameJoinRequest {
   bet: number;
   playerName: string;
   playerId: string;
-  cardNumber: number;
+  cardNumber?: number;
+  cardNumbers?: number[];
   userId?: string;
   telegramId?: string;
 }
@@ -139,20 +145,17 @@ export interface BingoWinEventPayload {
 
 
 export interface VerifyResponse {
-  success: boolean;
+  success?: boolean;
   message?: string;
   error?: string;
-  data?: {
-    ok: boolean;
-    user?: UserSafeType;
-  };
-
-
-}
-
-export interface VerifyResponse {
-  ok: boolean;
+  ok?: boolean;
   user?: UserSafeType;
+  token?: string;
+  data?: {
+    ok?: boolean;
+    user?: UserSafeType;
+    token?: string;
+  };
 }
 
 export interface MarkNumberRequest {

@@ -46,3 +46,102 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Lobby stake table — keep complex styles out of JSX className (SWC parse issues) */
+.lobby-table {
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: #0a1628;
+}
+
+.lobby-table-header {
+  display: grid;
+  grid-template-columns: 1.1fr 1.35fr 0.85fr 1.1fr 0.9fr;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  background: #f97316;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.lobby-table-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.35fr 0.85fr 1.1fr 0.9fr;
+  gap: 0.25rem;
+  align-items: center;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: #152a4a;
+  transition: background-color 0.15s ease;
+}
+
+.lobby-table-row:hover {
+  background: #1a3258;
+}
+
+.lobby-table-row.is-offline {
+  background: rgba(18, 32, 58, 0.6);
+  opacity: 0.6;
+}
+
+.lobby-active-badge {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 9999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.lobby-active-badge-label {
+  background: #dc2626;
+  color: #fff;
+  padding: 0.25rem 0.5rem;
+}
+
+.lobby-active-badge-dot {
+  background: #10b981;
+  padding: 0.25rem 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lobby-active-badge-dot span {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: #dc2626;
+}
+
+.lobby-play-btn {
+  min-width: 3.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+
+.lobby-play-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.lobby-play-btn.is-ready {
+  background: rgba(203, 213, 225, 0.9);
+  color: #4338ca;
+}
+
+.lobby-play-btn.is-ready:hover {
+  background: #e2e8f0;
+}
+
+.lobby-play-btn:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: #6b7280;
+  cursor: not-allowed;
+}

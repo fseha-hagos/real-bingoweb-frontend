@@ -59,7 +59,7 @@ interface GameContextType {
   setResultOverlayOpen: (boolean) => void;
   // Actions
   refreshGames: () => void;
-  joinGame: (bet: number, joinData: Omit<GameJoinRequest, 'bet'>) => Promise<{ success: boolean; error?: string; gameId?: string }>;
+  joinGame: (bet: number, joinData: Omit<GameJoinRequest, 'bet'>) => Promise<{ success: boolean; error?: string; gameId?: string; card?: any; cards?: any[] }>;
   watchGame: (bet: number) => void;
   leaveGame: () => void;
   // markNumber: (gameId: string, number: number,bet :number, playerId: string) => void;
@@ -143,12 +143,12 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     async (
       bet: number,
       joinData: Omit<GameJoinRequest, "bet">
-    ): Promise<{ success: boolean; error?: string; gameId?: string }> => {
+    ): Promise<{ success: boolean; error?: string; gameId?: string; card?: any; cards?: any[] }> => {
       if (!connected || !socket) {
         return { success: false, error: am.notConnectedServer };
       }
 
-      return new Promise((resolve) => {
+      return new Promise<{ success: boolean; error?: string; gameId?: string; card?: any; cards?: any[] }>((resolve) => {
         let timeoutId: NodeJS.Timeout | null = null;
 
         // --- Event listeners ---
@@ -156,10 +156,13 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
           toast.success(am.queued(message));
         };
 
-        const handleJoined = (data: GameJoinRequest) => {
-          toast.success(am.joinedWithCard(data.cardNumber));
+        const handleJoined = (data: any) => {
+          const cardLabel = data.cardNumbers && data.cardNumbers.length > 0
+            ? data.cardNumbers.join(", ")
+            : (data.cardNumber ?? (data.card?.id ?? ""));
+          toast.success(am.joinedWithCard(cardLabel));
           cleanup();
-          resolve({ success: true, gameId: data.gameId });
+          resolve({ success: true, gameId: data.gameId, card: data.card, cards: data.cards });
         };
 
         const handleError = ({ message }: { message: string }) => {

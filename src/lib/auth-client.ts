@@ -2,9 +2,9 @@
 
 /**
  * Thin Better Auth HTTP client (no better-auth npm package required).
- * Uses same-origin /api/auth/* (Next.js rewrites to the backend).
+ * Uses same-origin /api/auth/* so the session cookie is set on the frontend
+ * origin (localhost or Vercel), then proxied to the Express backend.
  */
-
 async function authFetch<T = unknown>(
   path: string,
   init: RequestInit = {}
@@ -73,6 +73,48 @@ export const authClient = {
         method: "POST",
         body: JSON.stringify({ phoneNumber, code }),
       }),
+  },
+
+  /** Phone digits or custom username + password */
+  signIn: {
+    username: async ({
+      username,
+      password,
+    }: {
+      username: string;
+      password: string;
+    }) =>
+      authFetch<{ user?: { id: string }; token?: string }>("/sign-in/username", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      }),
+  },
+
+  register: async ({
+    username,
+    password,
+    name,
+    phoneNumber,
+  }: {
+    username: string;
+    password: string;
+    name?: string;
+    phoneNumber?: string;
+  }) => {
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, name, phoneNumber }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { data: null, error: { message: data.error || "Registration failed" } };
+      }
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: { message: err.message || "Network error" } };
+    }
   },
 
   getSession: async () =>

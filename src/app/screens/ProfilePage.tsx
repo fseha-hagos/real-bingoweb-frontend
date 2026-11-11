@@ -1,7 +1,7 @@
 "use client";
 
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
-import { CreditCard, Pencil, Trophy } from "lucide-react";
+import { CreditCard, Pencil, Trophy, Share2, Copy } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useGames } from "../../context/gameContext";
 import { useAuth } from "../../context/AuthContext";
@@ -57,6 +57,9 @@ export default function ProfileClient() {
   const [editing, setEditing] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteCount, setInviteCount] = useState(0);
+  const [inviteReward, setInviteReward] = useState(1);
   const { user } = useGames();
   const { signOut, setUser, user: authUser } = useAuth();
   const router = useRouter();
@@ -95,6 +98,18 @@ export default function ProfileClient() {
     };
 
     fetchProfile();
+  }, [player?.id]);
+
+  useEffect(() => {
+    if (!player?.id) return;
+    void (async () => {
+      const res = await apiClient.getMyReferral();
+      if (res.success && res.data) {
+        setInviteUrl(res.data.inviteUrl);
+        setInviteCount(res.data.inviteCount);
+        setInviteReward(res.data.rewardPerInvite);
+      }
+    })();
   }, [player?.id]);
 
   useEffect(() => {
@@ -201,6 +216,39 @@ export default function ProfileClient() {
               </p>
             </div>
           </div>
+
+          {/* Referral invite */}
+          {inviteUrl && (
+            <div className="relative z-10 mb-6 rounded-2xl border border-brand-accent/20 bg-brand-accent/5 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Share2 size={14} className="text-brand-accent" />
+                <p className="text-[10px] font-black uppercase tracking-widest text-brand-accent">
+                  {am.inviteFriends}
+                </p>
+              </div>
+              <p className="text-xs text-gray-400 mb-3 leading-relaxed">{am.inviteHint}</p>
+              <div className="flex flex-wrap gap-3 text-[11px] font-bold text-gray-300 mb-3">
+                <span>{am.inviteCount(inviteCount)}</span>
+                <span>·</span>
+                <span>{am.inviteReward(inviteReward)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(inviteUrl);
+                    toast.success(am.inviteCopied);
+                  } catch {
+                    toast.info(inviteUrl);
+                  }
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-brand-primary/90 py-2.5 text-xs font-black uppercase tracking-widest"
+              >
+                <Copy size={14} />
+                {am.copyInviteLink}
+              </button>
+            </div>
+          )}
 
           {/* Edit display name */}
           <div className="relative z-10 mb-6 rounded-2xl border border-white/10 bg-black/20 p-4">

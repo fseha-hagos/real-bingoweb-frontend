@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import React from "react";
+import React, { Suspense } from "react";
 import "./globals.css";
 import { AuthProvider } from "../context/AuthContext";
 import AppShell from "../components/AppShell";
+import ReferralCapture from "../components/ReferralCapture";
+import TelegramScript from "../components/TelegramScript";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { am } from "../constants/amharic";
@@ -28,8 +30,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="am">
+      <head>
+        <script src="https://telegram.org/js/telegram-web-app.js" />
+      </head>
       <body className="antialiased">
+        <TelegramScript />
         <AuthProvider>
+          <Suspense fallback={null}>
+            <ReferralCapture />
+          </Suspense>
           <AppShell>{children}</AppShell>
           <ToastContainer
             position="top-center"
