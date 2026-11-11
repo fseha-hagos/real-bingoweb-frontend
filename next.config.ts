@@ -4,6 +4,7 @@ import type { NextConfig } from "next";
 const PRODUCTION_BACKEND_URL = "https://real-bingoweb-backend.onrender.com";
 
 const nextConfig: NextConfig = {
+  skipTrailingSlashRedirect: true,
   async rewrites() {
     const backendUrl =
       process.env.BACKEND_URL ||
@@ -26,6 +27,14 @@ const nextConfig: NextConfig = {
       {
         source: "/health",
         destination: `${backendUrl}/health`,
+      },
+      {
+        source: "/socket.io",
+        destination: `${backendUrl}/socket.io/`,
+      },
+      {
+        source: "/socket.io/:path*",
+        destination: `${backendUrl}/socket.io/:path*`,
       },
     ];
   },

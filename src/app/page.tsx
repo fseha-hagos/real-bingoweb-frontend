@@ -36,7 +36,6 @@ export default function PlayPage() {
 
   const { connected } = useSocket();
   const { refreshUser, user: authUser, status: authStatus } = useAuth();
-  const isGuest = authStatus !== 'authenticated';
   const { user, games, gameLoading, userLoading, error, watchGame } = useGames() as {
     user: UserSafeType | null;
     games: Record<number, GameSession>;
@@ -47,6 +46,16 @@ export default function PlayPage() {
   };
 
   const player = user || authUser;
+  const isTgUser = Boolean(
+    player?.telegramId ||
+    (typeof window !== 'undefined' && (
+      window.Telegram?.WebApp?.initData ||
+      window.Telegram?.WebApp?.initDataUnsafe?.user?.id ||
+      window.location.search.includes('tgId') ||
+      window.location.hash.includes('tgWebAppData')
+    ))
+  );
+  const isGuest = authStatus !== 'authenticated' && !isTgUser;
   const showNameBanner = !isGuest && needsDisplayName(player);
 
   useEffect(() => {
@@ -96,7 +105,7 @@ export default function PlayPage() {
   };
 
   const handleSelectBet = (gameId: string, bet: number) => {
-    if (isGuest) {
+    if (isGuest && !isTgUser) {
       goToLogin();
       return;
     }
@@ -106,12 +115,9 @@ export default function PlayPage() {
 
     if (connected) {
       watchGame(bet);
-    } else {
-      toast.warn(am.notConnected);
-      setJoiningGame(false);
     }
 
-    router.push('/cards');
+    router.push(`/cards?bet=${bet}`);
     setJoiningGame(false);
   };
 
