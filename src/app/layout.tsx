@@ -30,9 +30,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="am">
-      <head>
-        <script src="https://telegram.org/js/telegram-web-app.js" />
-      </head>
       <body className="antialiased">
         <TelegramScript />
         <AuthProvider>

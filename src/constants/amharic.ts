@@ -243,7 +243,7 @@ export const am = {
   unknownVerification: "ያልታወቀ የማረጋገጫ ስህተት።",
   networkError: "❌ የአውታረ መረብ ወይም ያልተጠበቀ ስህተት።",
   queued: (msg: string) => `🟡 በረድፍ ላይ፡ ${msg}`,
-  joinedWithCard: (card: number) => `✅ በካርቴላ ቁጥር ${card} በተሳካ ሁኔታ ተቀላቅለዋል`,
+  joinedWithCard: (card: number | string) => `✅ በካርቴላ ቁጥር ${card} በተሳካ ሁኔታ ተቀላቅለዋል`,
   joinError: (msg: string) => `❌ የመቀላቀል ስህተት፡ ${msg}`,
   winnerWon: (name: string) => `${name} ጨዋታውን አሸነፈ!`,
   gameFinished: "ጨዋታ አልቋል",

@@ -6,7 +6,6 @@ import { useGames } from '../context/gameContext';
 import { useSocket } from '../context/SocketContext';
 import { SELECTED_GAME_DATA } from '../constants/configurations';
 import { LeaderboardEntry } from '../types/game';
-import { API_BASE_URL } from '../lib/api';
 import { toast } from 'react-toastify';
 import { am, translateGameStatus } from '../constants/amharic';
 import { getDisplayName } from '../lib/player';

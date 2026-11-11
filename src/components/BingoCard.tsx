@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 
 // Define the data structure for when a bingo is completed
 interface BingoCardCompleteData {

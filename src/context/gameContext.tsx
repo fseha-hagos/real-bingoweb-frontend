@@ -59,7 +59,7 @@ interface GameContextType {
   setResultOverlayOpen: (boolean) => void;
   // Actions
   refreshGames: () => void;
-  joinGame: (bet: number, joinData: Omit<GameJoinRequest, 'bet'>) => Promise<{ success: boolean; error?: string; gameId?: string; card?: any; cards?: any[] }>;
+  joinGame: (bet: number, joinData: Omit<GameJoinRequest, 'bet'>) => Promise<{ success: boolean; error?: string; gameId?: string; card?: Cartela; cards?: Cartela[] }>;
   watchGame: (bet: number) => void;
   leaveGame: () => void;
   // markNumber: (gameId: string, number: number,bet :number, playerId: string) => void;
@@ -143,12 +143,12 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     async (
       bet: number,
       joinData: Omit<GameJoinRequest, "bet">
-    ): Promise<{ success: boolean; error?: string; gameId?: string; card?: any; cards?: any[] }> => {
+    ): Promise<{ success: boolean; error?: string; gameId?: string; card?: Cartela; cards?: Cartela[] }> => {
       if (!connected || !socket) {
         return { success: false, error: am.notConnectedServer };
       }
 
-      return new Promise<{ success: boolean; error?: string; gameId?: string; card?: any; cards?: any[] }>((resolve) => {
+      return new Promise<{ success: boolean; error?: string; gameId?: string; card?: Cartela; cards?: Cartela[] }>((resolve) => {
         let timeoutId: NodeJS.Timeout | null = null;
 
         // --- Event listeners ---
@@ -156,7 +156,13 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
           toast.success(am.queued(message));
         };
 
-        const handleJoined = (data: any) => {
+        const handleJoined = (data: {
+          gameId?: string;
+          card?: Cartela;
+          cards?: Cartela[];
+          cardNumber?: number;
+          cardNumbers?: number[];
+        }) => {
           const cardLabel = data.cardNumbers && data.cardNumbers.length > 0
             ? data.cardNumbers.join(", ")
             : (data.cardNumber ?? (data.card?.id ?? ""));
@@ -302,11 +308,9 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const won = winner && (winner.id === user.id || winner.id === user.telegramId);
     const playerData = game.players.find(p => p.id === user.id || p.id === user.telegramId);
     const playerCard = playerData?.card;
     const playerCardNumber = playerData?.cardNumber;
-    const calledNumbers = game.calledNumbers || [];
 
     console.log(
       "🏁 Game finished:",
@@ -326,22 +330,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
 
     // ✅ Only set result data if we have valid player data
     if (playerCardNumber && playerCard) {
-      // ✅ Handle card structure: could be { id, numbers } or just numbers array
-      type CardStructure = number[][] | { id?: number; numbers: number[][] };
-      const cardStructure = playerCard as CardStructure;
-      const cardNumbers = Array.isArray(cardStructure)
-        ? cardStructure
-        : cardStructure.numbers;
-
-      //   setBingoResultData({
-      //     cartela: {
-      //       id: playerCardNumber,
-      //       numbers: cardNumbers
-      //     },
-      //     calledNumbers,
-      //     won: won || false,
-      //   });
-      //   setResultOverlayOpen(true);
+      // Result overlay logic if enabled
     }
 
   }, [user, handleGameUpdate]);

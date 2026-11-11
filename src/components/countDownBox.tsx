@@ -1,17 +1,14 @@
 
 
-// Your existing function
-function getTimeRemaining(target: Date) {
-  const total = Math.max(0, target.getTime() - Date.now());
-  const seconds = Math.floor((total / 1000) % 60);
-  const minutes = Math.floor((total / 1000 / 60) % 60);
-  const hours = Math.floor((total / (1000 * 60 * 60)) % 24);
-  const days = Math.floor(total / (1000 * 60 * 60 * 24));
-  return { total, days, hours, minutes, seconds };
+export interface TimeLeft {
+  total: number;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
 }
 
-
-export default function CountdownBox({ timeLeft }: { timeLeft: ReturnType<typeof getTimeRemaining> }) {
+export default function CountdownBox({ timeLeft }: { timeLeft: TimeLeft }) {
   const pad = (n: number) => n.toString().padStart(2, '0');
 
   return (
