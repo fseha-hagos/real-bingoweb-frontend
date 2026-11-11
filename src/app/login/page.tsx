@@ -21,13 +21,19 @@ function phoneToUsername(e164: string): string {
 }
 
 type Mode = "login" | "signup";
-type SignupStep = "phone" | "otp" | "password";
+type SignupMethod = "username" | "phone";
 
 export default function LoginPage() {
   const router = useRouter();
   const { refreshUser, setUser, status, user } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
-  const [signupStep, setSignupStep] = useState<SignupStep>("phone");
+  const [signupMethod, setSignupMethod] = useState<SignupMethod>("username");
+  const [signupStep, setSignupStep] = useState<"phone" | "otp" | "password">("phone");
+
+  // Form states
+  const [loginIdentifier, setLoginIdentifier] = useState("");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [national, setNational] = useState("");
   const [phoneE164, setPhoneE164] = useState("");
   const [otp, setOtp] = useState("");
@@ -44,6 +50,7 @@ export default function LoginPage() {
     // AuthContext keeps us on /login when hasPassword is false
     if (needsPassword) {
       setMode("signup");
+      setSignupMethod("phone");
       setSignupStep("password");
       setInfo(am.setPasswordHint);
       if (user?.phoneNumber) setPhoneE164(user.phoneNumber);
@@ -51,7 +58,7 @@ export default function LoginPage() {
   }, [needsPassword, user?.phoneNumber]);
 
   useEffect(() => {
-    // Fully signed-in users leave login (AuthContext also redirects)
+    // Fully signed-in users leave login
     if (status === "authenticated" && user?.hasPassword !== false) {
       router.replace("/");
     }
@@ -90,14 +97,14 @@ export default function LoginPage() {
     return true;
   };
 
-  const loginWithPassword = async (e: FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setInfo(null);
 
-    const formatted = normalizeEthiopianPhone(national.trim());
-    if (!formatted.startsWith("+251") || formatted.length < 13) {
-      setError(am.invalidPhone);
+    const rawId = loginIdentifier.trim();
+    if (!rawId) {
+      setError("Please enter your username or phone number");
       return;
     }
     if (!password) {
@@ -105,22 +112,96 @@ export default function LoginPage() {
       return;
     }
 
+    // Determine if it's a phone number or username
+    let resolvedUsername = rawId;
+    if (/^\+?251\d+$/.test(rawId) || /^09\d{8}$/.test(rawId) || /^07\d{8}$/.test(rawId)) {
+      resolvedUsername = phoneToUsername(normalizeEthiopianPhone(rawId));
+    }
+
     setLoading(true);
     try {
-      const username = phoneToUsername(formatted);
       const { error: signError } = await authClient.signIn.username({
-        username,
+        username: resolvedUsername,
         password,
       });
       if (signError) {
-        setError(am.loginFailed);
+        setError(signError.message || am.loginFailed);
         setInfo(am.loginNoPasswordHint);
         return;
       }
       await finishAuth();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError(am.loginFailed);
+      setError(err?.message || am.loginFailed);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUsernameSignup = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+
+    const cleanUsername = username.trim().toLowerCase();
+    if (cleanUsername.length < 3) {
+      setError("Username must be at least 3 characters");
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+      setError("Username can only contain letters, numbers, and underscores");
+      return;
+    }
+    if (password.length < 6) {
+      setError(am.passwordTooShort);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError(am.passwordMismatch);
+      return;
+    }
+
+    let phoneValue: string | undefined = undefined;
+    if (national.trim()) {
+      const formatted = normalizeEthiopianPhone(national.trim());
+      if (!formatted.startsWith("+251") || formatted.length < 13) {
+        setError(am.invalidPhone);
+        return;
+      }
+      phoneValue = formatted;
+    }
+
+    setLoading(true);
+    try {
+      const regResult = await authClient.register({
+        username: cleanUsername,
+        password,
+        name: displayName.trim() || cleanUsername,
+        phoneNumber: phoneValue,
+      });
+
+      if (regResult.error) {
+        setError(regResult.error.message || "Registration failed");
+        return;
+      }
+
+      // Immediately sign in with the new credentials
+      const { error: signError } = await authClient.signIn.username({
+        username: cleanUsername,
+        password,
+      });
+
+      if (signError) {
+        setError("Account created, but sign in failed. Please log in.");
+        setMode("login");
+        setLoginIdentifier(cleanUsername);
+        return;
+      }
+
+      await finishAuth();
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.message || "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -173,7 +254,6 @@ export default function LoginPage() {
         return;
       }
 
-      // Session cookie set — next step is create password
       let user = await refreshUser();
       if (!user && data?.user?.id) {
         await new Promise((r) => setTimeout(r, 400));
@@ -295,48 +375,156 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* LOGIN FORM */}
             {mode === "login" && (
-              <form onSubmit={loginWithPassword} className="space-y-4">
-                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
-                  {am.phoneLabel}
-                </label>
-                <div className="flex gap-2">
-                  <div className="rounded-2xl bg-black/30 border border-white/10 px-3 py-3 text-sm text-gray-400 font-bold">
-                    +251
-                  </div>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Username or Phone Number
+                  </label>
                   <input
-                    type="tel"
-                    inputMode="numeric"
-                    autoComplete="tel-national"
-                    placeholder="912345678"
-                    value={national}
-                    onChange={(e) =>
-                      setNational(e.target.value.replace(/[^\d]/g, "").slice(0, 10))
-                    }
-                    className="flex-1 rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
+                    type="text"
+                    autoComplete="username"
+                    placeholder="e.g. john_doe or 0912345678"
+                    value={loginIdentifier}
+                    onChange={(e) => setLoginIdentifier(e.target.value)}
+                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                    required
                   />
                 </div>
-                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
-                  {am.passwordLabel}
-                </label>
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary"
-                />
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    {am.passwordLabel}
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                    required
+                  />
+                </div>
+
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full rounded-2xl bg-brand-primary py-3.5 text-sm font-black uppercase tracking-widest disabled:opacity-50 active:scale-[0.98] transition"
+                  className="w-full rounded-2xl bg-brand-primary py-3.5 text-sm font-black uppercase tracking-widest disabled:opacity-50 active:scale-[0.98] transition hover:bg-brand-primary/90 mt-2"
                 >
                   {loading ? am.loggingIn : am.loginButton}
                 </button>
               </form>
             )}
 
-            {mode === "signup" && signupStep === "phone" && (
+            {/* SIGNUP FORM (USERNAME + PASSWORD) */}
+            {mode === "signup" && signupMethod === "username" && signupStep !== "password" && (
+              <form onSubmit={handleUsernameSignup} className="space-y-3.5">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Username <span className="text-brand-accent">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    autoComplete="username"
+                    placeholder="e.g. bingo_winner"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.replace(/\s+/g, ""))}
+                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Display Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. John"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Phone Number (Optional)
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="rounded-2xl bg-black/30 border border-white/10 px-3 py-3 text-sm text-gray-400 font-bold">
+                      +251
+                    </div>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      placeholder="912345678"
+                      value={national}
+                      onChange={(e) =>
+                        setNational(e.target.value.replace(/[^\d]/g, "").slice(0, 10))
+                      }
+                      className="flex-1 rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Password <span className="text-brand-accent">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Min 6 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5">
+                    Confirm Password <span className="text-brand-accent">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Repeat password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-4 py-3 text-white outline-none focus:border-brand-primary text-sm"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-2xl bg-brand-primary py-3.5 text-sm font-black uppercase tracking-widest disabled:opacity-50 active:scale-[0.98] transition hover:bg-brand-primary/90 mt-2 shadow-lg shadow-brand-primary/20"
+                >
+                  {loading ? "Creating Account..." : "Create Account"}
+                </button>
+
+                <div className="pt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSignupMethod("phone");
+                      setSignupStep("phone");
+                    }}
+                    className="text-xs text-brand-secondary hover:underline"
+                  >
+                    Or Register via SMS OTP
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* SIGNUP VIA PHONE OTP (OPTIONAL ALTERNATIVE) */}
+            {mode === "signup" && signupMethod === "phone" && signupStep === "phone" && (
               <form onSubmit={sendOtp} className="space-y-4">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500">
                   {am.phoneLabel}
@@ -364,10 +552,20 @@ export default function LoginPage() {
                 >
                   {loading ? am.sendingOtp : am.sendOtp}
                 </button>
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setSignupMethod("username")}
+                    className="text-xs text-brand-secondary hover:underline"
+                  >
+                    Back to Username Registration
+                  </button>
+                </div>
               </form>
             )}
 
-            {mode === "signup" && signupStep === "otp" && (
+            {/* OTP VERIFICATION STEP */}
+            {mode === "signup" && signupMethod === "phone" && signupStep === "otp" && (
               <form onSubmit={verifyOtp} className="space-y-4">
                 <p className="text-sm text-gray-300 text-center">
                   {am.otpSentTo}{" "}
@@ -418,6 +616,7 @@ export default function LoginPage() {
               </form>
             )}
 
+            {/* SET PASSWORD STEP */}
             {mode === "signup" && signupStep === "password" && (
               <form onSubmit={createPassword} className="space-y-4">
                 <p className="text-sm text-gray-300 text-center leading-relaxed">
@@ -448,20 +647,22 @@ export default function LoginPage() {
                   disabled={loading}
                   className="w-full rounded-2xl bg-brand-primary py-3.5 text-sm font-black uppercase tracking-widest disabled:opacity-50 active:scale-[0.98] transition"
                 >
-                  {loading ? am.creatingAccount : am.createAccount}
+                  {loading ? am.saving : am.setPasswordTitle}
                 </button>
               </form>
             )}
 
-            {info && (
-              <p className="mt-4 text-xs text-emerald-400 text-center leading-relaxed">{info}</p>
-            )}
             {error && (
-              <p className="mt-4 text-xs text-rose-400 text-center">{error}</p>
+              <div className="mt-4 p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs text-center font-bold">
+                {error}
+              </div>
+            )}
+            {info && (
+              <div className="mt-4 p-3 rounded-2xl bg-brand-secondary/10 border border-brand-secondary/20 text-brand-secondary text-xs text-center font-bold">
+                {info}
+              </div>
             )}
           </div>
-
-          <p className="text-center text-[11px] text-gray-600 mt-6">{am.loginFooter}</p>
         </div>
       </div>
     </div>

@@ -34,15 +34,12 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
       (window.location.hostname === "localhost" ||
         window.location.hostname === "127.0.0.1");
 
-    // If someone left a production wss URL while browsing localhost, force local backend
-    const looksRemote =
-      !!envUrl &&
-      (envUrl.includes("onrender.com") || envUrl.startsWith("wss://"));
-
+    // If running in local browser, prefer local backend 3001 unless specified
     const serverUrl =
-      isBrowserLocal && (!envUrl || looksRemote)
-        ? "https://real-bingoweb-backend.onrender.com"
-        : envUrl || "https://real-bingoweb-backend.onrender.com";
+      envUrl ||
+      (isBrowserLocal
+        ? "http://localhost:3001"
+        : "https://real-bingoweb-backend.onrender.com");
 
     console.log("🔌 Socket connecting to:", serverUrl);
     setConnectionStatus('connecting');

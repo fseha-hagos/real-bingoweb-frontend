@@ -44,7 +44,9 @@ export interface Player {
   telegramId?: string | null;
   socketId?: string;
   cardNumber?: number;
+  cardNumbers?: number[];
   card?: Cartela;
+  cards?: Cartela[];
   joinedAt?: string;
   isReady?: boolean;
   incorrectBingoClaims?: number;
@@ -102,7 +104,8 @@ export interface GameJoinRequest {
   bet: number;
   playerName: string;
   playerId: string;
-  cardNumber: number;
+  cardNumber?: number;
+  cardNumbers?: number[];
   userId?: string;
   telegramId?: string;
 }

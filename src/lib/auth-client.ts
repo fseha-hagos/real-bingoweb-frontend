@@ -75,7 +75,7 @@ export const authClient = {
       }),
   },
 
-  /** Phone digits as username (e.g. 251912345678) + password — no OTP */
+  /** Phone digits or custom username + password */
   signIn: {
     username: async ({
       username,
@@ -88,6 +88,33 @@ export const authClient = {
         method: "POST",
         body: JSON.stringify({ username, password }),
       }),
+  },
+
+  register: async ({
+    username,
+    password,
+    name,
+    phoneNumber,
+  }: {
+    username: string;
+    password: string;
+    name?: string;
+    phoneNumber?: string;
+  }) => {
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, name, phoneNumber }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { data: null, error: { message: data.error || "Registration failed" } };
+      }
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: { message: err.message || "Network error" } };
+    }
   },
 
   getSession: async () =>
