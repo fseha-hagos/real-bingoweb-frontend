@@ -27,20 +27,28 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
   const [lastError, setLastError] = useState<string | undefined>();
 
   useEffect(() => {
-    // Prefer explicit env; fall back to same host as the page API in local/dev
     const envUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
     const isBrowserLocal =
       typeof window !== "undefined" &&
       (window.location.hostname === "localhost" ||
         window.location.hostname === "127.0.0.1");
+    const isNgrok =
+      typeof window !== "undefined" &&
+      (window.location.hostname.includes("ngrok") ||
+        window.location.hostname.includes("loca.lt"));
 
-    // If running on phone/ngrok/remote domain, connect to current origin so Next.js proxies
-    // socket requests cleanly without CORS or unreachable localhost port issues.
-    // If running in local browser, connect directly to local backend port 3001.
-    const serverUrl =
-      typeof window !== "undefined" && !isBrowserLocal
-        ? window.location.origin
-        : (envUrl || "http://localhost:3001");
+    // In production (Vercel), connect DIRECTLY to the Render backend socket server.
+    // In local ngrok testing, proxy through window.location.origin.
+    // In local dev, connect to localhost:3001.
+    let serverUrl: string;
+    if (isBrowserLocal) {
+      serverUrl = envUrl || "http://localhost:3001";
+    } else if (isNgrok) {
+      serverUrl = window.location.origin;
+    } else {
+      serverUrl =
+        envUrl || "https://real-bingoweb-backend.onrender.com";
+    }
 
     console.log("🔌 Socket connecting to:", serverUrl);
     setConnectionStatus('connecting');

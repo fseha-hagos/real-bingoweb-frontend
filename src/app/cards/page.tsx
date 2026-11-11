@@ -17,50 +17,37 @@ export default function CardsPage() {
   const [previewCardNumber, setPreviewCardNumber] = useState<number | null>(null);
   const [cartelasList, setCartelasList] = useState<Cartela[]>(cartelasData as Cartela[]);
   const [joining, setJoining] = useState(false);
+  const [activeBet, setActiveBet] = useState<number>(10);
 
   const { connected } = useSocket();
   const { user, currentGame, joinGame, watchGame } = useGames();
 
-  // Subscribe once on mount
+  // Subscribe and sync stake whenever connected or parameters change
   useEffect(() => {
-    // 1. Check URL parameters for ?bet=X or ?stake=X (e.g. from Telegram WebApp button)
+    let betVal = 10;
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const queryBet = urlParams.get('bet') || urlParams.get('stake');
 
       if (queryBet && !isNaN(Number(queryBet))) {
-        const betVal = Number(queryBet);
-        sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: betVal }));
-        watchGame(betVal);
-        return;
-      }
-    }
-
-    const storedGameData = sessionStorage.getItem(SELECTED_GAME_DATA);
-
-    if (!storedGameData) {
-      // Default to 10 Birr stake so user stays on cards page instead of getting kicked out
-      const defaultBet = 10;
-      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: defaultBet }));
-      watchGame(defaultBet);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(storedGameData) as { bet?: number };
-      if (parsed.bet) {
-        watchGame(parsed.bet);
+        betVal = Number(queryBet);
       } else {
-        const defaultBet = 10;
-        sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: defaultBet }));
-        watchGame(defaultBet);
+        const storedGameData = sessionStorage.getItem(SELECTED_GAME_DATA);
+        if (storedGameData) {
+          try {
+            const parsed = JSON.parse(storedGameData) as { bet?: number };
+            if (parsed.bet) betVal = parsed.bet;
+          } catch {}
+        }
       }
-    } catch {
-      const defaultBet = 10;
-      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: defaultBet }));
-      watchGame(defaultBet);
+      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: betVal }));
     }
-  }, [router, watchGame]);
+
+    setActiveBet(betVal);
+    if (connected) {
+      watchGame(betVal);
+    }
+  }, [connected, watchGame]);
 
   // Attempt to load fresh cartelas list from backend API
   useEffect(() => {
@@ -165,19 +152,21 @@ export default function CardsPage() {
     setPreviewCardNumber(null);
   };
 
-  if (!currentGame) {
-    return (
-      <div className="min-h-screen bg-brand-bg text-white flex items-center justify-center">
-        <div className="text-center text-gray-400 animate-pulse">
-          <p className="text-sm font-bold">{am.initializing}</p>
-        </div>
-      </div>
-    );
-  }
+  const game = currentGame || {
+    id: `temp-${activeBet}`,
+    bet: activeBet,
+    players: [],
+    status: 'waiting' as const,
+    calledNumbers: [] as number[],
+    possibleWin: Math.floor(activeBet * 0.8),
+    bonus: 0,
+    maxPlayers: 10,
+    countdown: { running: false, secondsLeft: 0 },
+  };
 
-  const totalCost = selectedCards.length * currentGame.bet;
+  const totalCost = selectedCards.length * game.bet;
   const takenCardNumbers = new Set<number>();
-  currentGame.players.forEach((p) => {
+  game.players.forEach((p) => {
     if (p.cardNumber) takenCardNumbers.add(p.cardNumber);
     if (p.cardNumbers) p.cardNumbers.forEach((cn) => takenCardNumbers.add(cn));
   });
@@ -215,9 +204,9 @@ export default function CardsPage() {
 
           <div className="flex gap-1.5 flex-1 ml-2">
             {[
-              { label: am.stake, value: `${currentGame.bet} ETB` },
-              { label: am.win, value: `${currentGame.possibleWin ?? 0} ETB` },
-              { label: am.players, value: currentGame.players.length },
+              { label: am.stake, value: `${game.bet} ETB` },
+              { label: am.win, value: `${game.possibleWin ?? 0} ETB` },
+              { label: am.players, value: game.players.length },
               { label: "Balance", value: `${user?.balance ?? 0} ETB` },
             ].map((stat) => (
               <div
@@ -240,14 +229,14 @@ export default function CardsPage() {
         {/* Countdown / Game Status */}
         <div className="px-4 mt-3">
           <div className="py-1 bg-brand-primary/5 backdrop-blur-xl rounded-2xl border border-brand-primary/20 text-center">
-            {currentGame.status === 'waiting' ? (
+            {game.status === 'waiting' ? (
               <div className="flex flex-row gap-3 items-center justify-center">
                 <span className="text-xs font-black text-brand-primary uppercase tracking-widest">
                   {am.gameStartingIn}
                 </span>
                 <span className="text-2xl font-black text-white tracking-tighter animate-pulse">
-                  {currentGame.countdown?.running
-                    ? `00:${currentGame.countdown.secondsLeft.toString().padStart(2, '0')}`
+                  {game.countdown?.running
+                    ? `00:${game.countdown.secondsLeft.toString().padStart(2, '0')}`
                     : '--'}
                 </span>
               </div>
@@ -257,7 +246,7 @@ export default function CardsPage() {
                   {am.gameStatus}
                 </span>
                 <span className="text-xl font-black text-white uppercase tracking-tighter">
-                  {translateGameStatus(currentGame.status)}
+                  {translateGameStatus(game.status)}
                 </span>
               </div>
             )}
@@ -406,7 +395,7 @@ export default function CardsPage() {
               selectedCards.length === 0 ||
               joining ||
               !connected ||
-              currentGame.status === 'started' ||
+              game.status === 'started' ||
               (user?.balance ?? 0) < totalCost
             }
             className={`
@@ -414,7 +403,7 @@ export default function CardsPage() {
               ${selectedCards.length === 0 ||
                 joining ||
                 !connected ||
-                currentGame.status === 'started' ||
+                game.status === 'started' ||
                 (user?.balance ?? 0) < totalCost
                 ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
                 : 'bg-brand-primary text-white hover:bg-brand-primary/90 shadow-brand-primary/20'
