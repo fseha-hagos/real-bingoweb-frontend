@@ -16,11 +16,23 @@ import { needsDisplayName } from '../lib/player';
 
 export default function PlayPage() {
   const router = useRouter();
-  const bets = [10, 50, 100, 300];
+  const bets = [10, 20, 50, 100, 300];
   const [rejoinData, setRejoinData] = useState<{ gameId: string; bet: number } | null>(null);
   const [balanceRefreshing, setBalanceRefreshing] = useState(false);
   const [joiningGame, setJoiningGame] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+
+  // If URL has ?bet=X (e.g. from Telegram WebApp button), forward straight to /cards
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const queryBet = params.get('bet') || params.get('stake');
+    if (queryBet && !isNaN(Number(queryBet))) {
+      const betVal = Number(queryBet);
+      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: betVal }));
+      router.replace(`/cards?bet=${betVal}`);
+    }
+  }, [router]);
 
   const { connected } = useSocket();
   const { refreshUser, user: authUser, status: authStatus } = useAuth();

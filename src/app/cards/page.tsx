@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import cartelas from '../../data/cartelas.json';
+import cartelasData from '../../data/cartelas.json';
 import { useSocket } from '../../context/SocketContext';
 import { useGames } from '../../context/gameContext';
 import { Cartela } from '../../types/game';
@@ -13,15 +13,29 @@ import { getDisplayName } from '../../lib/player';
 
 export default function CardsPage() {
   const router = useRouter();
-  const [selectedCard, setSelectedCard] = useState<number | null>(null);
-  const [chosenCartela, setChosenCartela] = useState<Cartela | null>(null);
+  const [selectedCards, setSelectedCards] = useState<number[]>([]);
+  const [previewCardNumber, setPreviewCardNumber] = useState<number | null>(null);
+  const [cartelasList, setCartelasList] = useState<Cartela[]>(cartelasData as Cartela[]);
   const [joining, setJoining] = useState(false);
 
   const { connected } = useSocket();
   const { user, currentGame, joinGame, watchGame } = useGames();
 
-  // Subscribe once on mount — do not re-run on every currentGame socket update
+  // Subscribe once on mount
   useEffect(() => {
+    // 1. Check URL parameters for ?bet=X or ?stake=X (e.g. from Telegram WebApp button)
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryBet = urlParams.get('bet') || urlParams.get('stake');
+
+      if (queryBet && !isNaN(Number(queryBet))) {
+        const betVal = Number(queryBet);
+        sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: betVal }));
+        watchGame(betVal);
+        return;
+      }
+    }
+
     const storedGameData = sessionStorage.getItem(SELECTED_GAME_DATA);
 
     if (!storedGameData) {
@@ -41,22 +55,51 @@ export default function CardsPage() {
     }
   }, [router, watchGame]);
 
+  // Attempt to load fresh cartelas list from backend API
   useEffect(() => {
-    if (selectedCard != null) {
-      setChosenCartela(cartelas[selectedCard - 1] ?? null);
-    } else {
-      setChosenCartela(null);
-    }
-  }, [selectedCard]);
+    fetch('/api/cartelas')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setCartelasList(data as Cartela[]);
+        }
+      })
+      .catch(() => {
+        // Fallback to bundled cartelas
+      });
+  }, []);
+
+  const chosenCartela =
+    previewCardNumber != null
+      ? cartelasList.find((c) => c.id === previewCardNumber) ?? null
+      : null;
 
   const handleBack = () => router.push('/');
 
   const handleCardSelect = (number: number) => {
-    setSelectedCard(number);
+    setSelectedCards((prev) => {
+      if (prev.includes(number)) {
+        const next = prev.filter((n) => n !== number);
+        setPreviewCardNumber(next.length > 0 ? next[next.length - 1] : null);
+        return next;
+      } else {
+        if (prev.length >= 4) {
+          toast.info("Maximum 4 cards per game");
+          return prev;
+        }
+        const totalStake = (prev.length + 1) * (currentGame?.bet || 0);
+        if ((user?.balance ?? 0) < totalStake) {
+          toast.error("Insufficient balance for another card");
+          return prev;
+        }
+        setPreviewCardNumber(number);
+        return [...prev, number];
+      }
+    });
   };
 
-  const handleJoinGame = async (cardNumber: number) => {
-    if (!connected || !currentGame || !user || joining) return;
+  const handleJoinGame = async () => {
+    if (!connected || !currentGame || !user || joining || selectedCards.length === 0) return;
 
     setJoining(true);
 
@@ -68,12 +111,21 @@ export default function CardsPage() {
         gameId: currentGame.id,
         playerName,
         playerId,
-        cardNumber,
+        cardNumber: selectedCards[0],
+        cardNumbers: selectedCards,
         userId: user.id,
         telegramId: user.telegramId || undefined,
       });
 
       if (result.success) {
+        const resolvedCards = selectedCards
+          .map(
+            (num) =>
+              cartelasList.find((c) => c.id === num) ||
+              (cartelasData as Cartela[]).find((c) => c.id === num)
+          )
+          .filter(Boolean) as Cartela[];
+
         sessionStorage.setItem(
           PLAYER_GAME_DATA,
           JSON.stringify({
@@ -82,11 +134,12 @@ export default function CardsPage() {
             telegramId: user.telegramId || user.id,
             playerName,
             playerId,
-            cardNumber,
+            cardNumber: selectedCards[0],
+            cardNumbers: selectedCards,
+            cards: resolvedCards,
             bet: currentGame.bet,
           })
         );
-        // Navigate without flipping joining back — avoids unmount + setState race
         router.replace('/game');
         return;
       }
@@ -101,8 +154,8 @@ export default function CardsPage() {
   };
 
   const handleRefresh = () => {
-    setSelectedCard(null);
-    setChosenCartela(null);
+    setSelectedCards([]);
+    setPreviewCardNumber(null);
   };
 
   if (!currentGame) {
@@ -115,27 +168,32 @@ export default function CardsPage() {
     );
   }
 
+  const totalCost = selectedCards.length * currentGame.bet;
+  const takenCardNumbers = new Set<number>();
+  currentGame.players.forEach((p) => {
+    if (p.cardNumber) takenCardNumbers.add(p.cardNumber);
+    if (p.cardNumbers) p.cardNumbers.forEach((cn) => takenCardNumbers.add(cn));
+  });
+
   return (
     <div className="min-h-screen bg-brand-bg text-white flex flex-col">
+      {/* Live sync banner */}
       <div
-        className={`sticky top-0 z-50 text-center py-2 text-xs font-black tracking-widest uppercase transition-colors duration-500 ${
-          connected
+        className={`sticky top-0 z-50 text-center py-2 text-xs font-black tracking-widest uppercase transition-colors duration-500 ${connected
             ? 'bg-emerald-500/10 text-emerald-400 border-b border-emerald-500/20 backdrop-blur-md'
             : 'bg-rose-500/10 text-rose-400 border-b border-rose-500/20 backdrop-blur-md'
-        }`}
+          }`}
       >
         <div className="flex items-center justify-center gap-2">
           <div
-            className={`w-1.5 h-1.5 rounded-full ${
-              connected
-                ? 'bg-emerald-400 animate-pulse'
-                : 'bg-current'
-            }`}
+            className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-current'
+              }`}
           />
           {connected ? am.systemLive : am.disconnected}
         </div>
       </div>
 
+      {/* Top Header Bar */}
       <div className="sticky top-0 z-40 w-full bg-white/5 backdrop-blur-2xl border-b border-white/5 shadow-2xl">
         <div className="flex items-center justify-between p-3 gap-2">
           <button
@@ -150,15 +208,16 @@ export default function CardsPage() {
 
           <div className="flex gap-1.5 flex-1 ml-2">
             {[
-              { label: am.stake, value: currentGame.bet },
-              { label: am.win, value: currentGame.possibleWin },
+              { label: am.stake, value: `${currentGame.bet} ETB` },
+              { label: am.win, value: `${currentGame.possibleWin ?? 0} ETB` },
               { label: am.players, value: currentGame.players.length },
+              { label: "Balance", value: `${user?.balance ?? 0} ETB` },
             ].map((stat) => (
               <div
                 key={stat.label}
                 className="flex-1 bg-white/5 border border-white/5 rounded-xl py-1.5 text-center px-1"
               >
-                <div className="text-xs text-gray-500 font-black uppercase tracking-widest leading-none mb-1">
+                <div className="text-[9px] text-gray-500 font-black uppercase tracking-widest leading-none mb-1">
                   {stat.label}
                 </div>
                 <div className="text-xs font-black tracking-tighter text-white">
@@ -170,7 +229,8 @@ export default function CardsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div className="flex-1 overflow-y-auto scrollbar-hide pb-24">
+        {/* Countdown / Game Status */}
         <div className="px-4 mt-3">
           <div className="py-1 bg-brand-primary/5 backdrop-blur-xl rounded-2xl border border-brand-primary/20 text-center">
             {currentGame.status === 'waiting' ? (
@@ -197,24 +257,64 @@ export default function CardsPage() {
           </div>
         </div>
 
-        <div className="px-5 mt-8 mb-4 flex items-center justify-between">
-          <h3 className="text-xs font-black uppercase tracking-widest text-gray-400">
-            {am.selectYourNumber}
-          </h3>
-          <span className="text-xs font-black text-brand-secondary uppercase bg-brand-secondary/5 px-2 py-0.5 rounded-full border border-brand-secondary/10">
-            1 - 100
+        {/* Multi-Card Selection Bar */}
+        <div className="px-5 mt-4 mb-2 flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-widest text-gray-300">
+              Select Your Cartelas (Max 4)
+            </h3>
+            <p className="text-[10px] text-gray-500 font-bold">
+              Tap to select or deselect. You can play multiple cards!
+            </p>
+          </div>
+          <span className="text-xs font-black text-brand-secondary uppercase bg-brand-secondary/10 px-2.5 py-1 rounded-full border border-brand-secondary/20">
+            {selectedCards.length} / 4 Selected
           </span>
         </div>
 
+        {/* Selected Cards Chips */}
+        {selectedCards.length > 0 && (
+          <div className="px-4 mb-3 flex flex-wrap gap-2 items-center">
+            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+              Active:
+            </span>
+            {selectedCards.map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => setPreviewCardNumber(num)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black border transition ${previewCardNumber === num
+                    ? 'bg-brand-primary text-white border-brand-primary'
+                    : 'bg-white/10 text-gray-300 border-white/10 hover:bg-white/15'
+                  }`}
+              >
+                <span>#{num}</span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCardSelect(num);
+                  }}
+                  className="text-rose-400 hover:text-rose-200 ml-1 text-xs"
+                >
+                  ✕
+                </span>
+              </button>
+            ))}
+            <span className="text-xs font-black text-emerald-400 ml-auto">
+              Total: {totalCost} ETB
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2">
-          <div className="px-4 mb-8">
+          {/* Card number grid 1-100 */}
+          <div className="px-4 mb-4">
             <div className="grid grid-cols-10 gap-1.5">
               {Array.from({ length: 100 }, (_, i) => {
                 const number = i + 1;
-                const cardOccupied = currentGame.players.some(
-                  (p) => p.cardNumber === number
-                );
-                const isSelected = selectedCard === number;
+                const cardOccupied = takenCardNumbers.has(number);
+                const isSelected = selectedCards.includes(number);
+                const isPreview = previewCardNumber === number;
 
                 return (
                   <button
@@ -224,12 +324,13 @@ export default function CardsPage() {
                     disabled={cardOccupied || joining}
                     className={`
                       w-full aspect-square text-xs font-black rounded-lg transition-all duration-200 relative overflow-hidden flex items-center justify-center
-                      ${
-                        isSelected
-                          ? 'bg-brand-primary text-white scale-110 shadow-lg z-10'
-                          : cardOccupied
-                            ? 'bg-red-600 text-gray-300 cursor-not-allowed border border-white/5'
-                            : 'bg-white/5 text-gray-400 border border-white/5 hover:bg-white/10 hover:text-white'
+                      ${isSelected
+                        ? isPreview
+                          ? 'bg-brand-primary text-white scale-110 shadow-lg ring-2 ring-white z-10'
+                          : 'bg-brand-primary/80 text-white scale-105 z-10'
+                        : cardOccupied
+                          ? 'bg-rose-950/40 text-rose-800 cursor-not-allowed border border-rose-900/30'
+                          : 'bg-white/5 text-gray-400 border border-white/5 hover:bg-white/10 hover:text-white'
                       }
                     `}
                   >
@@ -240,14 +341,15 @@ export default function CardsPage() {
             </div>
           </div>
 
-          {selectedCard != null && chosenCartela && (
-            <div className="px-4 pb-12">
-              <div className="bg-white/5 backdrop-blur-2xl rounded-3xl p-6 border border-white/10 text-center relative overflow-hidden">
+          {/* Cartela Preview */}
+          {chosenCartela && (
+            <div className="px-4 pb-6">
+              <div className="bg-white/5 backdrop-blur-2xl rounded-3xl p-5 border border-white/10 text-center relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-brand-primary/5 rounded-full blur-3xl pointer-events-none" />
 
-                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6">
+                <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">
                   {am.previewCard}{' '}
-                  <span className="text-brand-accent ml-2">#{selectedCard}</span>
+                  <span className="text-brand-accent ml-2">#{chosenCartela.id}</span>
                 </h3>
 
                 <div className="flex justify-center">
@@ -257,12 +359,11 @@ export default function CardsPage() {
                         const currentNum = column[row];
                         return (
                           <div
-                            key={`${selectedCard}-${row}-${colIdx}`}
+                            key={`${chosenCartela.id}-${row}-${colIdx}`}
                             className={`w-11 h-11 flex items-center justify-center rounded-xl text-xs font-black
-                              ${
-                                currentNum === 0
-                                  ? 'bg-brand-primary text-white shadow-lg animate-pulse'
-                                  : 'bg-white/5 text-gray-400 border border-white/5'
+                              ${currentNum === 0
+                                ? 'bg-brand-primary text-white shadow-lg animate-pulse'
+                                : 'bg-white/5 text-gray-300 border border-white/5'
                               }
                             `}
                           >
@@ -279,35 +380,37 @@ export default function CardsPage() {
         </div>
       </div>
 
-      <div className="sticky bottom-0 bg-brand-bg/80 backdrop-blur-md border-t border-white/5 px-4 pb-8 pt-4">
-        <div className="flex gap-3 max-w-lg mx-auto">
+      {/* Sticky Bottom Join Bar */}
+      <div className="fixed bottom-0 left-0 right-0 bg-brand-bg/95 backdrop-blur-md border-t border-white/10 px-4 py-3 z-50">
+        <div className="flex gap-3 max-w-lg mx-auto items-center">
           <button
             type="button"
             onClick={handleRefresh}
             disabled={joining}
-            className="flex-1 py-4 bg-white/5 border border-white/5 hover:bg-white/10 text-gray-400 font-black uppercase tracking-widest text-xs rounded-2xl transition-all active:scale-95"
+            className="py-3.5 px-4 bg-white/5 border border-white/5 hover:bg-white/10 text-gray-400 font-black uppercase tracking-widest text-xs rounded-2xl transition-all active:scale-95"
           >
-            {am.refresh}
+            Clear
           </button>
 
           <button
             type="button"
-            onClick={() => selectedCard != null && handleJoinGame(selectedCard)}
+            onClick={handleJoinGame}
             disabled={
-              selectedCard == null ||
+              selectedCards.length === 0 ||
               joining ||
               !connected ||
-              currentGame.status === 'started'
+              currentGame.status === 'started' ||
+              (user?.balance ?? 0) < totalCost
             }
             className={`
-              flex-[2] py-4 font-black uppercase tracking-widest text-xs rounded-2xl active:scale-95 transition-all relative overflow-hidden
-              ${
-                selectedCard == null ||
+              flex-1 py-3.5 font-black uppercase tracking-widest text-xs rounded-2xl active:scale-95 transition-all relative overflow-hidden shadow-xl
+              ${selectedCards.length === 0 ||
                 joining ||
                 !connected ||
-                currentGame.status === 'started'
-                  ? 'bg-white/5 text-gray-700 border border-white/5 cursor-not-allowed'
-                  : 'bg-brand-primary text-white hover:bg-brand-primary/90'
+                currentGame.status === 'started' ||
+                (user?.balance ?? 0) < totalCost
+                ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                : 'bg-brand-primary text-white hover:bg-brand-primary/90 shadow-brand-primary/20'
               }
             `}
           >
@@ -318,8 +421,13 @@ export default function CardsPage() {
               </div>
             ) : !connected ? (
               am.linkError
+            ) : selectedCards.length === 0 ? (
+              "Select At Least 1 Card"
+            ) : (user?.balance ?? 0) < totalCost ? (
+              "Insufficient Balance"
             ) : (
-              am.confirmEntry
+              `Confirm Entry (${selectedCards.length} ${selectedCards.length === 1 ? 'Card' : 'Cards'
+              } • ${totalCost} ETB)`
             )}
           </button>
         </div>
