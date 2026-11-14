@@ -19,8 +19,23 @@ export default function CardsPage() {
   const [joining, setJoining] = useState(false);
   const [activeBet, setActiveBet] = useState<number>(10);
 
-  const { connected } = useSocket();
-  const { user, currentGame, joinGame, watchGame } = useGames();
+  const { socket, connected } = useSocket();
+  const { user, games, currentGame, joinGame, watchGame } = useGames();
+
+  const activeGame = (activeBet && games && games[activeBet]) || currentGame;
+  const game = activeGame || {
+    id: `temp-${activeBet}`,
+    bet: activeBet,
+    players: [],
+    status: 'waiting' as const,
+    calledNumbers: [] as number[],
+    possibleWin: activeBet,
+    bonus: 0,
+    maxPlayers: 10,
+    countdown: { running: false, secondsLeft: 0 },
+  };
+
+  const isGameStarted = game.status === 'started';
 
   // Subscribe and sync stake whenever connected or parameters change
   useEffect(() => {
@@ -63,12 +78,89 @@ export default function CardsPage() {
       });
   }, []);
 
+  // Check if current user is already registered in this active game session
+  const myExistingPlayer = currentGame?.players.find(
+    (p) =>
+      (user?.id && p.id === user.id) ||
+      (user?.telegramId && (p.id === user.telegramId || p.telegramId === user.telegramId))
+  );
+
+  // Auto-redirect returning players back into the game
+  useEffect(() => {
+    if (!currentGame || !myExistingPlayer || !user) return;
+
+    const playerCardNums =
+      myExistingPlayer.cardNumbers && myExistingPlayer.cardNumbers.length > 0
+        ? myExistingPlayer.cardNumbers
+        : myExistingPlayer.cardNumber
+          ? [myExistingPlayer.cardNumber]
+          : [];
+
+    const resolvedCards =
+      myExistingPlayer.cards && myExistingPlayer.cards.length > 0
+        ? myExistingPlayer.cards
+        : myExistingPlayer.card
+          ? [myExistingPlayer.card]
+          : (playerCardNums
+              .map(
+                (cn) =>
+                  cartelasList.find((c) => c.id === cn) ||
+                  (cartelasData as Cartela[]).find((c) => c.id === cn)
+              )
+              .filter(Boolean) as Cartela[]);
+
+    sessionStorage.setItem(
+      PLAYER_GAME_DATA,
+      JSON.stringify({
+        gameId: currentGame.id,
+        userId: user.id,
+        telegramId: user.telegramId || user.id,
+        playerName: getDisplayName(user),
+        playerId: user.id,
+        cardNumber: playerCardNums[0],
+        cardNumbers: playerCardNums,
+        cards: resolvedCards,
+        bet: currentGame.bet,
+      })
+    );
+
+    // Redirect to /game directly
+    router.replace('/game');
+  }, [currentGame, myExistingPlayer, user, cartelasList, router]);
+
   const chosenCartela =
     previewCardNumber != null
       ? cartelasList.find((c) => c.id === previewCardNumber) ?? null
       : null;
 
-  const handleBack = () => router.push('/');
+  // Auto-redirect all users (players & spectators) to /game immediately when game starts
+  useEffect(() => {
+    if (
+      isGameStarted ||
+      currentGame?.status === 'started' ||
+      (activeBet && games && games[activeBet]?.status === 'started')
+    ) {
+      router.replace('/game');
+    }
+  }, [isGameStarted, currentGame?.status, games, activeBet, router]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onStarted = () => {
+      router.replace('/game');
+    };
+    const onGameUpdate = (updatedGame: GameSession) => {
+      if (updatedGame && (updatedGame.bet === activeBet || !activeBet) && updatedGame.status === 'started') {
+        router.replace('/game');
+      }
+    };
+    socket.on('gameStarted', onStarted);
+    socket.on('gameUpdate', onGameUpdate);
+    return () => {
+      socket.off('gameStarted', onStarted);
+      socket.off('gameUpdate', onGameUpdate);
+    };
+  }, [socket, activeBet, router]);
 
   const handleCardSelect = (number: number) => {
     setSelectedCards((prev) => {
@@ -78,12 +170,12 @@ export default function CardsPage() {
         return next;
       } else {
         if (prev.length >= 4) {
-          toast.info("Maximum 4 cards per game");
+          toast.info('Maximum 4 cards per game');
           return prev;
         }
         const totalStake = (prev.length + 1) * (currentGame?.bet || 0);
         if ((user?.balance ?? 0) < totalStake) {
-          toast.error("Insufficient balance for another card");
+          toast.error('Insufficient balance for another card');
           return prev;
         }
         setPreviewCardNumber(number);
@@ -152,62 +244,94 @@ export default function CardsPage() {
     setPreviewCardNumber(null);
   };
 
-  const game = currentGame || {
-    id: `temp-${activeBet}`,
-    bet: activeBet,
-    players: [],
-    status: 'waiting' as const,
-    calledNumbers: [] as number[],
-    possibleWin: Math.floor(activeBet * 0.8),
-    bonus: 0,
-    maxPlayers: 10,
-    countdown: { running: false, secondsLeft: 0 },
-  };
+
 
   const totalCost = selectedCards.length * game.bet;
-  const takenCardNumbers = new Set<number>();
+
+  const totalCardsCount = (game.players || []).reduce(
+    (sum, p) =>
+      sum +
+      (Array.isArray(p.cards) && p.cards.length > 0
+        ? p.cards.length
+        : Array.isArray(p.cardNumbers) && p.cardNumbers.length > 0
+          ? p.cardNumbers.length
+          : p.cardNumber || p.card
+            ? 1
+            : 0),
+    0
+  );
+
+  const displayWin =
+    game.possibleWin ||
+    (game.players.length <= 1
+      ? (totalCardsCount || 1) * game.bet
+      : Math.floor((totalCardsCount || 1) * game.bet * 0.8));
+
+  // Separate cards: My own already-selected cards vs taken by OTHER players
+  const takenByOthers = new Set<number>();
+  const myCardsSet = new Set<number>();
+
   game.players.forEach((p) => {
-    if (p.cardNumber) takenCardNumbers.add(p.cardNumber);
-    if (p.cardNumbers) p.cardNumbers.forEach((cn) => takenCardNumbers.add(cn));
+    const isMe =
+      user &&
+      ((user.id && p.id === user.id) ||
+        (user.telegramId &&
+          (p.id === user.telegramId || p.telegramId === user.telegramId)));
+
+    if (isMe) {
+      if (p.cardNumber) myCardsSet.add(p.cardNumber);
+      if (p.cardNumbers) p.cardNumbers.forEach((cn) => myCardsSet.add(cn));
+    } else {
+      if (p.cardNumber) takenByOthers.add(p.cardNumber);
+      if (p.cardNumbers) p.cardNumbers.forEach((cn) => takenByOthers.add(cn));
+    }
   });
+
+  const isAlreadyJoined = myCardsSet.size > 0 || Boolean(myExistingPlayer);
+
+
+  // If game is started, immediately show transition screen and route to /game
+  if (isGameStarted) {
+    return (
+      <div className="min-h-screen bg-brand-bg text-white flex flex-col items-center justify-center p-4 select-none">
+        <div className="w-12 h-12 rounded-full border-4 border-emerald-500/20 border-t-emerald-400 animate-spin mb-4 shadow-[0_0_20px_rgba(16,185,129,0.3)]" />
+        <h2 className="text-base font-black text-white tracking-wide mb-1">
+          {isAlreadyJoined ? 'ወደ ጨዋታው በመመለስ ላይ...' : 'ጨዋታው ተጀምሯል! በመሸጋገር ላይ...'}
+        </h2>
+        <p className="text-xs text-slate-400 font-bold">እባክዎ ይጠብቁ...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-brand-bg text-white flex flex-col">
       {/* Live sync banner */}
       <div
-        className={`sticky top-0 z-50 text-center py-2 text-xs font-black tracking-widest uppercase transition-colors duration-500 ${connected
-          ? 'bg-emerald-500/10 text-emerald-400 border-b border-emerald-500/20 backdrop-blur-md'
-          : 'bg-rose-500/10 text-rose-400 border-b border-rose-500/20 backdrop-blur-md'
-          }`}
+        className={`sticky top-0 z-50 text-center py-2 text-xs font-black tracking-widest uppercase transition-colors duration-500 ${
+          connected
+            ? 'bg-emerald-500/10 text-emerald-400 border-b border-emerald-500/20 backdrop-blur-md'
+            : 'bg-rose-500/10 text-rose-400 border-b border-rose-500/20 backdrop-blur-md'
+        }`}
       >
         <div className="flex items-center justify-center gap-2">
           <div
-            className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-current'
-              }`}
+            className={`w-1.5 h-1.5 rounded-full ${
+              connected ? 'bg-emerald-400 animate-pulse' : 'bg-current'
+            }`}
           />
           {connected ? am.systemLive : am.disconnected}
         </div>
       </div>
 
-      {/* Top Header Bar */}
+      {/* Top Header Bar (Temeles removed, players = total cards chosen) */}
       <div className="sticky top-0 z-40 w-full bg-white/5 backdrop-blur-2xl border-b border-white/5 shadow-2xl">
-        <div className="flex items-center justify-between p-3 gap-2">
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all active:scale-95 group"
-          >
-            <span className="text-brand-primary group-hover:-translate-x-0.5 transition-transform">
-              ←
-            </span>
-            <span className="text-xs font-black uppercase tracking-widest">{am.back}</span>
-          </button>
-
-          <div className="flex gap-1.5 flex-1 ml-2">
+        <div className="p-3">
+          <div className="flex gap-1.5 w-full">
             {[
               { label: am.stake, value: `${game.bet} ETB` },
-              { label: am.win, value: `${game.possibleWin ?? 0} ETB` },
-              { label: am.players, value: game.players.length },
-              { label: "Balance", value: `${user?.balance ?? 0} ETB` },
+              { label: am.win, value: `${displayWin} ETB` },
+              { label: am.players, value: totalCardsCount },
+              { label: 'Balance', value: `${user?.balance ?? 0} ETB` },
             ].map((stat) => (
               <div
                 key={stat.label}
@@ -225,7 +349,30 @@ export default function CardsPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide pb-24">
+      <div className="flex-1 overflow-y-auto scrollbar-hide pb-28">
+        {/* Already Joined Alert Banner */}
+        {isAlreadyJoined && (
+          <div className="mx-4 mt-3 p-3 rounded-2xl bg-indigo-950/80 border border-indigo-500/50 flex items-center justify-between shadow-xl">
+            <div>
+              <p className="text-xs font-black text-indigo-300">
+                🎉 እርስዎ አስቀድመው በዚህ ጨዋታ ተመዝግበዋል!
+              </p>
+              <p className="text-[11px] text-slate-400">
+                የመረጧቸው ካርቴላዎች፦ {Array.from(myCardsSet).join(', ') || 'Active'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.replace('/game')}
+              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider transition active:scale-95 shadow-md shadow-indigo-500/40"
+            >
+              ቀጥል
+            </button>
+          </div>
+        )}
+
+
+
         {/* Countdown / Game Status */}
         <div className="px-4 mt-3">
           <div className="py-1 bg-brand-primary/5 backdrop-blur-xl rounded-2xl border border-brand-primary/20 text-center">
@@ -236,7 +383,11 @@ export default function CardsPage() {
                 </span>
                 <span className="text-2xl font-black text-white tracking-tighter animate-pulse">
                   {game.countdown?.running
-                    ? `00:${game.countdown.secondsLeft.toString().padStart(2, '0')}`
+                    ? `${Math.floor((game.countdown.secondsLeft || 0) / 60)
+                        .toString()
+                        .padStart(2, '0')}:${((game.countdown.secondsLeft || 0) % 60)
+                        .toString()
+                        .padStart(2, '0')}`
                     : '--'}
                 </span>
               </div>
@@ -279,10 +430,11 @@ export default function CardsPage() {
                 key={num}
                 type="button"
                 onClick={() => setPreviewCardNumber(num)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black border transition ${previewCardNumber === num
-                  ? 'bg-brand-primary text-white border-brand-primary'
-                  : 'bg-white/10 text-gray-300 border-white/10 hover:bg-white/15'
-                  }`}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black border transition ${
+                  previewCardNumber === num
+                    ? 'bg-brand-primary text-white border-brand-primary'
+                    : 'bg-white/10 text-gray-300 border-white/10 hover:bg-white/15'
+                }`}
               >
                 <span>#{num}</span>
                 <span
@@ -308,7 +460,8 @@ export default function CardsPage() {
             <div className="grid grid-cols-10 gap-1.5">
               {Array.from({ length: 100 }, (_, i) => {
                 const number = i + 1;
-                const cardOccupied = takenCardNumbers.has(number);
+                const isMyRegisteredCard = myCardsSet.has(number);
+                const isTakenByOther = takenByOthers.has(number);
                 const isSelected = selectedCards.includes(number);
                 const isPreview = previewCardNumber === number;
 
@@ -316,21 +469,33 @@ export default function CardsPage() {
                   <button
                     key={number}
                     type="button"
-                    onClick={() => handleCardSelect(number)}
-                    disabled={cardOccupied || joining}
+                    onClick={() => {
+                      if (!isMyRegisteredCard && !isTakenByOther) {
+                        handleCardSelect(number);
+                      } else {
+                        setPreviewCardNumber(number);
+                      }
+                    }}
+                    disabled={isTakenByOther || joining}
                     className={`
                       w-full aspect-square text-xs font-black rounded-lg transition-all duration-200 relative overflow-hidden flex items-center justify-center
-                      ${isSelected
-                        ? isPreview
-                          ? 'bg-brand-primary text-white scale-110 shadow-lg ring-2 ring-white z-10'
-                          : 'bg-brand-primary/80 text-white scale-105 z-10'
-                        : cardOccupied
-                          ? 'bg-rose-950/40 text-rose-800 cursor-not-allowed border border-rose-900/30'
-                          : 'bg-white/5 text-gray-400 border border-white/5 hover:bg-white/10 hover:text-white'
+                      ${
+                        isMyRegisteredCard
+                          ? 'bg-emerald-500/25 text-emerald-300 border-2 border-emerald-400 ring-2 ring-emerald-400/30 z-10 scale-105'
+                          : isSelected
+                            ? isPreview
+                              ? 'bg-brand-primary text-white scale-110 shadow-lg ring-2 ring-white z-10'
+                              : 'bg-brand-primary/80 text-white scale-105 z-10'
+                            : isTakenByOther
+                              ? 'bg-rose-950/40 text-rose-800 cursor-not-allowed border border-rose-900/30'
+                              : 'bg-white/5 text-gray-400 border border-white/5 hover:bg-white/10 hover:text-white'
                       }
                     `}
                   >
                     {number}
+                    {isMyRegisteredCard && (
+                      <span className="absolute top-0 right-0 w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+                    )}
                   </button>
                 );
               })}
@@ -357,9 +522,10 @@ export default function CardsPage() {
                           <div
                             key={`${chosenCartela.id}-${row}-${colIdx}`}
                             className={`w-11 h-11 flex items-center justify-center rounded-xl text-xs font-black
-                              ${currentNum === 0
-                                ? 'bg-brand-primary text-white shadow-lg animate-pulse'
-                                : 'bg-white/5 text-gray-300 border border-white/5'
+                              ${
+                                currentNum === 0
+                                  ? 'bg-brand-primary text-white shadow-lg animate-pulse'
+                                  : 'bg-white/5 text-gray-300 border border-white/5'
                               }
                             `}
                           >
@@ -379,53 +545,69 @@ export default function CardsPage() {
       {/* Sticky Bottom Join Bar */}
       <div className="fixed bottom-0 left-0 right-0 bg-brand-bg/95 backdrop-blur-md border-t border-white/10 px-4 py-3 z-50">
         <div className="flex gap-3 max-w-lg mx-auto items-center">
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={joining}
-            className="py-3.5 px-4 bg-white/5 border border-white/5 hover:bg-white/10 text-gray-400 font-black uppercase tracking-widest text-xs rounded-2xl transition-all active:scale-95"
-          >
-            Clear
-          </button>
+          {isAlreadyJoined ? (
+            /* Player Already in Game -> Resume Game Button */
+            <button
+              type="button"
+              onClick={() => router.replace('/game')}
+              className="w-full py-4 rounded-2xl font-black text-sm uppercase tracking-widest bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/40 active:scale-95 transition-all"
+            >
+              🎮 ወደ ጨዋታው ይቀጥሉ (Resume Game)
+            </button>
+          ) : (
+            /* Normal Join Button */
+            <>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={joining}
+                className="py-3.5 px-4 bg-white/5 border border-white/5 hover:bg-white/10 text-gray-400 font-black uppercase tracking-widest text-xs rounded-2xl transition-all active:scale-95"
+              >
+                Clear
+              </button>
 
-          <button
-            type="button"
-            onClick={handleJoinGame}
-            disabled={
-              selectedCards.length === 0 ||
-              joining ||
-              !connected ||
-              game.status === 'started' ||
-              (user?.balance ?? 0) < totalCost
-            }
-            className={`
-              flex-1 py-3.5 font-black uppercase tracking-widest text-xs rounded-2xl active:scale-95 transition-all relative overflow-hidden shadow-xl
-              ${selectedCards.length === 0 ||
-                joining ||
-                !connected ||
-                game.status === 'started' ||
-                (user?.balance ?? 0) < totalCost
-                ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
-                : 'bg-brand-primary text-white hover:bg-brand-primary/90 shadow-brand-primary/20'
-              }
-            `}
-          >
-            {joining ? (
-              <div className="flex items-center justify-center gap-2">
-                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                {am.initializing}
-              </div>
-            ) : !connected ? (
-              am.linkError
-            ) : selectedCards.length === 0 ? (
-              "Select At Least 1 Card"
-            ) : (user?.balance ?? 0) < totalCost ? (
-              "Insufficient Balance"
-            ) : (
-              `Confirm Entry (${selectedCards.length} ${selectedCards.length === 1 ? 'Card' : 'Cards'
-              } • ${totalCost} ETB)`
-            )}
-          </button>
+              <button
+                type="button"
+                onClick={handleJoinGame}
+                disabled={
+                  selectedCards.length === 0 ||
+                  joining ||
+                  !connected ||
+                  game.status === 'started' ||
+                  (user?.balance ?? 0) < totalCost
+                }
+                className={`
+                  flex-1 py-3.5 font-black uppercase tracking-widest text-xs rounded-2xl active:scale-95 transition-all relative overflow-hidden shadow-xl
+                  ${
+                    selectedCards.length === 0 ||
+                    joining ||
+                    !connected ||
+                    game.status === 'started' ||
+                    (user?.balance ?? 0) < totalCost
+                      ? 'bg-white/5 text-gray-600 border border-white/5 cursor-not-allowed'
+                      : 'bg-brand-primary text-white hover:bg-brand-primary/90 shadow-brand-primary/20'
+                  }
+                `}
+              >
+                {joining ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    {am.initializing}
+                  </div>
+                ) : !connected ? (
+                  am.linkError
+                ) : selectedCards.length === 0 ? (
+                  'Select At Least 1 Card'
+                ) : (user?.balance ?? 0) < totalCost ? (
+                  'Insufficient Balance'
+                ) : (
+                  `Confirm Entry (${selectedCards.length} ${
+                    selectedCards.length === 1 ? 'Card' : 'Cards'
+                  } • ${totalCost} ETB)`
+                )}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
