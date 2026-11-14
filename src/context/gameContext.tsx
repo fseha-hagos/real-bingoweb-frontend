@@ -9,10 +9,11 @@ import { toast } from "react-toastify";
 import { am } from "../constants/amharic";
 import { useAuth } from "./AuthContext";
 
-import { PLAYER_GAME_DATA } from "../constants/configurations";
+import { PLAYER_GAME_DATA, SELECTED_GAME_DATA } from "../constants/configurations";
 
 import { useAmharicBingoVoice } from "../lib/useAmharicBIngoVoice";
 import { gamesToRecord } from "../lib/games";
+import cartelas from "../data/cartelas.json";
 
 const getLetter = (num: number) => {
   if (num >= 1 && num <= 15) return 'B';
@@ -297,97 +298,91 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     winner?: Player | null;
     game: GameSession;
   }) => {
-    // ✅ Minimal safety check
     if (!data?.game) return;
-
     const { game, winner } = data;
 
-    // ✅ Safety checks for user
-    if (!user || !user.id) {
-      console.error("User not loaded");
-      return;
-    }
-
-    const playerData = game.players.find(p => p.id === user.id || p.id === user.telegramId);
-    const playerCard = playerData?.card;
-    const playerCardNumber = playerData?.cardNumber;
-
-    console.log(
-      "🏁 Game finished:",
-      game.id,
-      winner ? `Winner: ${winner.name}` : "No winner yet"
-    );
-
-    // ✅ First update
     handleGameUpdate(game);
 
-    // ✅ Show toast with proper null check
     if (winner) {
       toast.success(am.winnerWon(winner.name));
+      let card = winner.card;
+      const cardNumber = winner.cardNumber || card?.id;
+      if (!card && cardNumber) {
+        card = (cartelas as Cartela[]).find((c) => c.id === cardNumber);
+      }
+      if (!card) {
+        card = (cartelas as Cartela[])[0];
+      }
+      const isUserWinner = Boolean(
+        user && (winner.id === user.id || winner.id === user.telegramId)
+      );
+      const cardNumbers = card ? normalizeCardNumbers(card) : (cartelas as Cartela[])[0].numbers;
+      setBingoResultData({
+        cartela: {
+          id: cardNumber || card?.id || 1,
+          numbers: cardNumbers,
+        },
+        calledNumbers: [...(game.calledNumbers || [])],
+        won: isUserWinner,
+        pattern: null,
+        bet: game.bet ?? null,
+        winnerName: winner.name ?? null,
+        winnerUsername:
+          winner.username ??
+          (winner as { telegramUsername?: string })?.telegramUsername ??
+          null,
+      });
+      setResultOverlayOpen(true);
     } else {
-      toast.success(am.gameFinished);
+      toast.info(am.gameFinished);
     }
-
-    // ✅ Only set result data if we have valid player data
-    if (playerCardNumber && playerCard) {
-      // Result overlay logic if enabled
-    }
-
   }, [user, handleGameUpdate]);
 
   const handleBingoWin = useCallback((data: BingoWinEventPayload) => {
     const { winner, game, prize, pattern } = data;
 
-    if (!user?.id) {
-      console.error("User is not loaded.");
-      return;
+    const isUserWinner = Boolean(
+      user && (winner?.id === user.id || winner?.id === user.telegramId)
+    );
+
+    let card = winner?.card;
+    const cardNumber = winner?.cardNumber || card?.id;
+    if (!card && cardNumber) {
+      card = (cartelas as Cartela[]).find((c) => c.id === cardNumber);
+    }
+    if (!card) {
+      card = (cartelas as Cartela[])[0];
     }
 
-    // -------------------------------
-    // 1. Determine win state cleanly
-    // -------------------------------
-    const isUserWinner = winner?.id === user.id || winner?.id === user.telegramId;
-    const card = winner?.card;
-    const cardNumber = winner?.cardNumber;
-    const calledNumbers = game.calledNumbers || [];
+    const calledNumbers = game?.calledNumbers || [];
 
-    // Update global game state (one re-render)
     handleGameUpdate(game);
 
-    // -------------------------------
-    // 2. Toast notification
-    // -------------------------------
     if (winner?.name) {
       toast.success(am.winnerWonPrize(winner.name, prize));
     }
 
-    // -------------------------------
-    // 3. Validate card and show result
-    // -------------------------------
-    if (card && cardNumber) {
-      const winnerName = winner?.name ?? null;
-      const winnerUsername =
-        winner?.username ??
-        winner?.telegramUsername ??
-        null;
-      const cardNumbers = normalizeCardNumbers(card);
-      const calledNumbersSnapshot = [...calledNumbers];
-      setBingoResultData({
-        cartela: {
-          id: cardNumber,
-          numbers: cardNumbers,
-        },
-        calledNumbers: calledNumbersSnapshot,
-        won: isUserWinner,
-        pattern,
-        bet: game?.bet ?? null,
-        winnerName,
-        winnerUsername,
-      });
+    const winnerName = winner?.name ?? null;
+    const winnerUsername =
+      winner?.username ??
+      (winner as { telegramUsername?: string })?.telegramUsername ??
+      null;
+    const cardNumbers = card ? normalizeCardNumbers(card) : (cartelas as Cartela[])[0].numbers;
+    const calledNumbersSnapshot = [...calledNumbers];
+    setBingoResultData({
+      cartela: {
+        id: cardNumber || card?.id || 1,
+        numbers: cardNumbers,
+      },
+      calledNumbers: calledNumbersSnapshot,
+      won: isUserWinner,
+      pattern: pattern ?? null,
+      bet: game?.bet ?? null,
+      winnerName,
+      winnerUsername,
+    });
 
-      setResultOverlayOpen(true);
-    }
-
+    setResultOverlayOpen(true);
   }, [user, handleGameUpdate]);
 
   const handleBalanceUpdate = useCallback((data: { balance: number }) => {
@@ -415,9 +410,37 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     toast.success(am.leftGame);
     setCurrentGame(null);
     sessionStorage.removeItem(PLAYER_GAME_DATA);
-    router.push('/');
+    let betVal = 20;
+    try {
+      const stored = sessionStorage.getItem(SELECTED_GAME_DATA);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.bet && !isNaN(Number(parsed.bet))) betVal = Number(parsed.bet);
+      }
+    } catch {}
+    router.push(`/cards?bet=${betVal}`);
   }, [router]);
 
+
+  const handleRejoinedGame = useCallback((data: {
+    targetGame: GameSession;
+    playerId: string;
+    player: Player;
+  }) => {
+    console.log("🔄 Rejoined game event:", data.targetGame?.id);
+    if (data.targetGame) {
+      handleGameUpdate(data.targetGame);
+      setCurrentGame(data.targetGame);
+    }
+  }, [handleGameUpdate]);
+
+  useEffect(() => {
+    if (!socket || !connected || !user) return;
+    socket.emit("identifyPlayer", {
+      playerId: user.id,
+      telegramId: user.telegramId || user.id,
+    });
+  }, [socket, connected, user]);
 
   useEffect(() => {
     if (!socket) return;
@@ -429,6 +452,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
 
     socket.on("gamesUpdate", handleGamesUpdate);
     socket.on("gameUpdate", handleGameUpdate);
+    socket.on("rejoinedGame", handleRejoinedGame);
     socket.on("numberCalled", handleNumberCalled);
     socket.on("gameStarted", handleGameStarted);
     socket.on("gameFinished", handleGameFinished);
@@ -439,10 +463,10 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     socket.on("leaveGameError", handleLeaveGameError);
     socket.on("leftGame", handleLeftGame);
 
-
     return () => {
       socket.off("gamesUpdate", handleGamesUpdate);
       socket.off("gameUpdate", handleGameUpdate);
+      socket.off("rejoinedGame", handleRejoinedGame);
       socket.off("numberCalled", handleNumberCalled);
       socket.off("gameStarted", handleGameStarted);
       socket.off("gameFinished", handleGameFinished);
