@@ -9,7 +9,7 @@ import { am } from "../constants/amharic";
 
 const navItems = [
   { href: "/leaderboard", key: "leaderboard", label: am.navLeaderboard, icon: Trophy },
-  { href: "/", key: "play", label: am.navPlay, icon: Gamepad2 },
+  { href: "/cards", key: "play", label: am.navPlay, icon: Gamepad2 },
   { href: "/wallet", key: "wallet", label: am.navWallet, icon: Wallet },
   { href: "/profile", key: "profile", label: am.navProfile, icon: User },
 ] as const;
@@ -23,8 +23,8 @@ export default function BottomNav() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const active =
-            item.href === "/"
-              ? pathname === "/"
+            item.href === "/cards"
+              ? pathname.startsWith("/cards") || pathname.startsWith("/game") || pathname === "/"
               : pathname.startsWith(item.href);
 
           return (
