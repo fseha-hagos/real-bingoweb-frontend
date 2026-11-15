@@ -57,6 +57,7 @@ export default function GamePage() {
     bingoResultData,
     resultOverlayOpen,
     setResultOverlayOpen,
+    setBingoResultData,
     games,
     setCurrentGame,
     user,
@@ -292,14 +293,20 @@ export default function GamePage() {
     }
   }, [currentGame, playerCards.length, user]);
 
+  const claimSubmittedRef = React.useRef(false);
+
+  useEffect(() => {
+    claimSubmittedRef.current = false;
+  }, [currentGame?.id]);
+
   // Socket error handler
   const handleBingoClaimError = useCallback(
     ({ message, removed }: { message: string; removed: boolean }) => {
-      toast.error(message);
+      setBingoClaiming(false);
+      toast.error(message, { toastId: 'bingo-claim-error' });
       if (removed) {
         setIsRemoved(true);
-        setBingoClaiming(true);
-        toast.error(am.tooManyAttempts);
+        toast.error(am.tooManyAttempts, { toastId: 'bingo-too-many' });
       }
     },
     []
@@ -314,17 +321,87 @@ export default function GamePage() {
   }, [socket, connected, handleBingoClaimError]);
 
   const handleBingoClick = useCallback(() => {
-    if (!currentGame || !playerData || !socket) return;
+    if (!currentGame || !socket || bingoClaiming || claimSubmittedRef.current) return;
 
+    claimSubmittedRef.current = true;
     setBingoClaiming(true);
+    toast.success('🎉 BINGO! የቢንጎ ጥያቄ ተልኳል...', { toastId: 'bingo-claim' });
     socket.emit('claimBingo', {
       gameId: currentGame.id,
-      playerId: playerData.playerId,
+      playerId: playerData?.playerId || user?.id,
+      userId: user?.id,
+      telegramId: user?.telegramId || playerData?.telegramId,
       bet: currentGame.bet,
     });
+  }, [currentGame, playerData, user, socket, bingoClaiming]);
 
-    setBingoClaiming(false);
-  }, [currentGame, playerData, socket]);
+  // Auto-detect finished game directly from currentGame state (state-driven sync)
+  useEffect(() => {
+    if (!currentGame) return;
+
+    if (currentGame.status === 'finished') {
+      const winner = currentGame.winner;
+      const isUserWinner = Boolean(
+        user && winner && (winner.id === user.id || winner.id === user.telegramId)
+      );
+
+      let card = winner?.card;
+      const cardNumber = winner?.cardNumber || card?.id;
+      if ((!card || !card.numbers || card.numbers.length === 0) && cardNumber) {
+        card = (cartelas as Cartela[]).find((c) => c.id === cardNumber);
+      }
+      if (!card || !card.numbers || card.numbers.length === 0) {
+        card = (cartelas as Cartela[])[0];
+      }
+
+      const cardNumbers = card ? card.numbers : (cartelas as Cartela[])[0].numbers;
+
+      setBingoResultData({
+        cartela: {
+          id: cardNumber || card?.id || 1,
+          numbers: cardNumbers,
+        },
+        calledNumbers: [...(currentGame.calledNumbers || [])],
+        won: isUserWinner,
+        pattern: null,
+        bet: currentGame.bet ?? null,
+        winnerName: winner?.name ?? (isUserWinner ? (getDisplayName(user) || 'You') : 'Winner'),
+        winnerUsername: winner?.username ?? null,
+      });
+
+      setResultOverlayOpen(true);
+    }
+  }, [currentGame?.status, currentGame?.winner, user, setResultOverlayOpen, setBingoResultData]);
+
+  // Guard: If there is no active game and player hasn't joined -> Block and redirect to /cards
+  useEffect(() => {
+    if (userLoading || gameLoading) return;
+    if (resultOverlayOpen) return;
+
+    const timer = setTimeout(() => {
+      const stored = typeof window !== 'undefined' ? sessionStorage.getItem(PLAYER_GAME_DATA) : null;
+      const hasPlayerCards = playerCards.length > 0 || !!stored;
+      const isGameLive = currentGame && (currentGame.status === 'started' || currentGame.status === 'waiting');
+
+      if (!hasPlayerCards && !isGameLive) {
+        router.replace('/cards');
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [userLoading, gameLoading, playerCards.length, currentGame, resultOverlayOpen, router]);
+
+  // Guaranteed fallback redirect when game finishes: After 5.5 seconds, return to /cards
+  useEffect(() => {
+    if (currentGame?.status === 'finished') {
+      const timer = setTimeout(() => {
+        const targetBet = currentGame?.bet || 20;
+        sessionStorage.removeItem(PLAYER_GAME_DATA);
+        router.replace(`/cards?bet=${targetBet}`);
+      }, 5500);
+      return () => clearTimeout(timer);
+    }
+  }, [currentGame?.status, currentGame?.bet, router]);
 
   // Auto-Daub & Auto-Claim functionality
   useEffect(() => {
@@ -350,10 +427,9 @@ export default function GamePage() {
       });
 
       // 2. Auto-claim Bingo when any card satisfies win pattern
-      if (currentGame.status === 'started' && !bingoClaiming && !isRemoved) {
+      if (currentGame.status === 'started' && !claimSubmittedRef.current && !bingoClaiming && !isRemoved) {
         const winningCard = playerCards.find((card) => checkBingoWin(called, card));
         if (winningCard) {
-          toast.success('🎉 BINGO! Submitting claim automatically...');
           handleBingoClick();
         }
       }
@@ -444,6 +520,20 @@ export default function GamePage() {
           <span>{connected ? 'Live' : 'Offline'}</span>
         </div>
       </div>
+
+      {/* Countdown Waiting Banner */}
+      {currentGame?.status === 'waiting' && currentGame?.countdown?.running && (
+        <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/20 to-amber-500/10 border border-amber-500/30 rounded-2xl py-2 px-4 text-center my-1 animate-pulse flex items-center justify-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-400" />
+          <span className="text-xs font-black text-amber-300 uppercase tracking-widest">
+            ጨዋታው በ {currentGame.countdown.secondsLeft || 0} ሰከንድ ይጀምራል...
+          </span>
+          <span className="text-xs text-amber-400 font-mono font-bold">
+            ({Math.floor((currentGame.countdown.secondsLeft || 0) / 60)}:
+            {String((currentGame.countdown.secondsLeft || 0) % 60).padStart(2, '0')})
+          </span>
+        </div>
+      )}
 
       {/* 2. Top Section: Stats, Number Caller, Auto Switch & Horizontal 75 Board with Hide/Show */}
       <div className="my-1">

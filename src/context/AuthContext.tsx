@@ -87,22 +87,42 @@ function hasSessionUser(payload: unknown): boolean {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<AuthStatus>("loading");
-  const [user, setUserState] = useState<UserSafeType | null>(null);
+  const [status, setStatus] = useState<AuthStatus>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("cached_auth_user");
+        if (cached) return "authenticated";
+      } catch { }
+    }
+    return "loading";
+  });
+  const [user, setUserState] = useState<UserSafeType | null>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem("cached_auth_user");
+        if (cached) return JSON.parse(cached);
+      } catch { }
+    }
+    return null;
+  });
   const router = useRouter();
   const pathname = usePathname();
 
   const setUser = useCallback((next: UserSafeType | null) => {
     setUserState((prev) => {
-      if (!next) return null;
-      return {
+      if (!next) {
+        try { localStorage.removeItem("cached_auth_user"); } catch { }
+        return null;
+      }
+      const updated = {
         ...next,
-        // Keep password flag if a partial update omitted it
         hasPassword:
           typeof next.hasPassword === "boolean"
             ? next.hasPassword
             : prev?.hasPassword,
       };
+      try { localStorage.setItem("cached_auth_user", JSON.stringify(updated)); } catch { }
+      return updated;
     });
     setStatus(next ? "authenticated" : "unauthenticated");
   }, []);
@@ -123,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } catch { }
           }
           setUserState(authedUser);
+          try { localStorage.setItem("cached_auth_user", JSON.stringify(authedUser)); } catch { }
           setStatus("authenticated");
           return authedUser;
         }
@@ -134,10 +155,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const next = res.data.user as UserSafeType;
       if (next.telegramId) next.hasPassword = true;
       setUserState(next);
+      try { localStorage.setItem("cached_auth_user", JSON.stringify(next)); } catch { }
       setStatus("authenticated");
       return next;
     }
     setUserState(null);
+    try { localStorage.removeItem("cached_auth_user"); } catch { }
     setStatus("unauthenticated");
     return null;
   }, []);
@@ -183,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } catch { }
             }
             setUserState(authedUser);
+            try { localStorage.setItem("cached_auth_user", JSON.stringify(authedUser)); } catch { }
             setStatus("authenticated");
             return;
           }
@@ -198,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             user.hasPassword = true;
           }
           setUserState(user);
+          try { localStorage.setItem("cached_auth_user", JSON.stringify(user)); } catch { }
           setStatus("authenticated");
           return;
         }

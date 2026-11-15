@@ -42,13 +42,9 @@ const BingoResult: React.FC<BingoResultProps> = ({
 
   const handlePlayAgain = () => {
     sessionStorage.removeItem(PLAYER_GAME_DATA);
-    if (bet) {
-      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet }));
-      router.replace(`/cards?bet=${bet}`);
-    } else {
-      router.replace("/cards");
-    }
-    onClose();
+    const targetBet = bet || 20;
+    sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: targetBet }));
+    router.replace(`/cards?bet=${targetBet}`);
     if (onPlayAgain) onPlayAgain();
   };
 

@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
 import { useSocket } from "./SocketContext";
 import { GameSession, Player, GameJoinRequest, UserSafeType, Cartela, BingoWinEventPayload, BingoWinPattern } from "../types/game";
 import { ApiClient, apiClient } from "../lib/api";
@@ -35,6 +35,19 @@ const normalizeCardNumbers = (
   return [];
 };
 
+export type BingoResultDataType = {
+  cartela: {
+    id: number;               // cardNumber from backend
+    numbers: number[][];      // 5x5 bingo grid
+  };
+  calledNumbers: number[];
+  won: boolean;
+  pattern: BingoWinPattern | null;
+  bet: number | null;
+  winnerName: string | null;
+  winnerUsername: string | null;
+} | null;
+
 interface GameContextType {
   games: Record<number, GameSession>;
   currentGame: GameSession | null;
@@ -45,19 +58,9 @@ interface GameContextType {
   setCurrentGame: (game: GameSession | null) => void;
 
   resultOverlayOpen: boolean;
-  bingoResultData: {
-    cartela: {
-      id: number;               // cardNumber from backend
-      numbers: number[][];      // 5x5 bingo grid
-    };
-    calledNumbers: number[];
-    won: boolean;
-    pattern: BingoWinPattern | null;
-    bet: number | null;
-    winnerName: string | null;
-    winnerUsername: string | null;
-  } | null;
-  setResultOverlayOpen: (boolean) => void;
+  bingoResultData: BingoResultDataType;
+  setResultOverlayOpen: (open: boolean) => void;
+  setBingoResultData: (data: BingoResultDataType) => void;
   // Actions
   refreshGames: () => void;
   joinGame: (bet: number, joinData: Omit<GameJoinRequest, 'bet'>) => Promise<{ success: boolean; error?: string; gameId?: string; card?: Cartela; cards?: Cartela[] }>;
@@ -71,6 +74,11 @@ const GameContext = createContext<GameContextType | null>(null);
 export const GameProvider = ({ children }: { children: ReactNode }) => {
   const { socket, connected } = useSocket();
   const { user, status: authStatus, setUser } = useAuth();
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   const [games, setGames] = useState<Record<number, GameSession>>({});
   const [currentGame, setCurrentGame] = useState<GameSession | null>(null);
   const [gameLoading, setGameLoading] = useState(false);
@@ -224,9 +232,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
 
   // ✅ handle game update and sets current game - moved outside useEffect to prevent recreation
   const handleGameUpdate = useCallback((game: GameSession) => {
-
     if (!game) {
-      toast.error(am.invalidGameUpdate);
       return;
     }
     // Update the specific game in the games record
@@ -242,6 +248,43 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       }
       return game; // update even if same game
     });
+
+    // Auto-detect finished game directly from game state updates
+    if (game.status === 'finished' && game.winner) {
+      const winner = game.winner;
+      const currentUser = userRef.current;
+      const isUserWinner = Boolean(
+        currentUser && (winner.id === currentUser.id || winner.id === currentUser.telegramId)
+      );
+
+      let card = winner.card;
+      const cardNumber = winner.cardNumber || card?.id;
+      if ((!card || !card.numbers || card.numbers.length === 0) && cardNumber) {
+        card = (cartelas as Cartela[]).find((c) => c.id === cardNumber);
+      }
+      if (!card || !card.numbers || card.numbers.length === 0) {
+        card = (cartelas as Cartela[])[0];
+      }
+
+      const cardNumbers = card ? normalizeCardNumbers(card) : (cartelas as Cartela[])[0].numbers;
+
+      setBingoResultData({
+        cartela: {
+          id: cardNumber || card?.id || 1,
+          numbers: cardNumbers,
+        },
+        calledNumbers: [...(game.calledNumbers || [])],
+        won: isUserWinner,
+        pattern: null,
+        bet: game.bet ?? null,
+        winnerName: winner.name ?? null,
+        winnerUsername:
+          winner.username ??
+          (winner as { telegramUsername?: string })?.telegramUsername ??
+          null,
+      });
+      setResultOverlayOpen(true);
+    }
   }, []);
 
   // Listen for game updates
@@ -286,7 +329,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       }
       return prev;
     });
-  }, []);
+  }, [speak]);
 
   const handleGameStarted = useCallback((data: { gameId: string; game: GameSession }) => {
     console.log("🚀 Game started:", data.gameId);
@@ -313,8 +356,9 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       if (!card) {
         card = (cartelas as Cartela[])[0];
       }
+      const currentUser = userRef.current;
       const isUserWinner = Boolean(
-        user && (winner.id === user.id || winner.id === user.telegramId)
+        currentUser && (winner.id === currentUser.id || winner.id === currentUser.telegramId)
       );
       const cardNumbers = card ? normalizeCardNumbers(card) : (cartelas as Cartela[])[0].numbers;
       setBingoResultData({
@@ -333,16 +377,15 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
           null,
       });
       setResultOverlayOpen(true);
-    } else {
-      toast.info(am.gameFinished);
     }
-  }, [user, handleGameUpdate]);
+  }, []);
 
   const handleBingoWin = useCallback((data: BingoWinEventPayload) => {
     const { winner, game, prize, pattern } = data;
 
+    const currentUser = userRef.current;
     const isUserWinner = Boolean(
-      user && (winner?.id === user.id || winner?.id === user.telegramId)
+      currentUser && (winner?.id === currentUser.id || winner?.id === currentUser.telegramId)
     );
 
     let card = winner?.card;
@@ -383,11 +426,14 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     });
 
     setResultOverlayOpen(true);
-  }, [user, handleGameUpdate]);
+  }, [handleGameUpdate]);
 
   const handleBalanceUpdate = useCallback((data: { balance: number }) => {
-    setUser(user ? { ...user, balance: data.balance } : user);
-  }, [setUser, user]);
+    const currentUser = userRef.current;
+    if (currentUser) {
+      setUser({ ...currentUser, balance: data.balance });
+    }
+  }, [setUser]);
 
   const handlePlayerJoined = useCallback((data: { gameId: string; player: Player; game: GameSession }) => {
     console.log("👤 Player joined:", data.player.name, "in game:", data.gameId);
@@ -502,6 +548,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       resultOverlayOpen,
       bingoResultData,
       setResultOverlayOpen,
+      setBingoResultData,
 
       setCurrentGame,
       refreshGames,
