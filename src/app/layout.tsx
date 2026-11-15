@@ -45,6 +45,7 @@ export default function RootLayout({
             closeOnClick
             pauseOnHover
             theme="dark"
+            limit={1}
           />
         </AuthProvider>
       </body>
