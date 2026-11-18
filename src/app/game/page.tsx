@@ -325,7 +325,6 @@ export default function GamePage() {
 
     claimSubmittedRef.current = true;
     setBingoClaiming(true);
-    toast.success('🎉 BINGO! የቢንጎ ጥያቄ ተልኳል...', { toastId: 'bingo-claim' });
     socket.emit('claimBingo', {
       gameId: currentGame.id,
       playerId: playerData?.playerId || user?.id,

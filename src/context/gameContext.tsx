@@ -64,6 +64,7 @@ interface GameContextType {
   // Actions
   refreshGames: () => void;
   joinGame: (bet: number, joinData: Omit<GameJoinRequest, 'bet'>) => Promise<{ success: boolean; error?: string; gameId?: string; card?: Cartela; cards?: Cartela[] }>;
+  removeCard: (bet: number, data: { gameId: string; playerId: string; cardNumber: number; userId?: string; telegramId?: string }) => Promise<{ success: boolean; error?: string }>;
   watchGame: (bet: number) => void;
   leaveGame: () => void;
   // markNumber: (gameId: string, number: number,bet :number, playerId: string) => void;
@@ -161,8 +162,8 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
         let timeoutId: NodeJS.Timeout | null = null;
 
         // --- Event listeners ---
-        const handleQueued = ({ message }: { message: string }) => {
-          toast.success(am.queued(message));
+        const handleQueued = () => {
+          // Silent - only rejections shown
         };
 
         const handleJoined = (data: {
@@ -172,10 +173,6 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
           cardNumber?: number;
           cardNumbers?: number[];
         }) => {
-          const cardLabel = data.cardNumbers && data.cardNumbers.length > 0
-            ? data.cardNumbers.join(", ")
-            : (data.cardNumber ?? (data.card?.id ?? ""));
-          toast.success(am.joinedWithCard(cardLabel));
           cleanup();
           resolve({ success: true, gameId: data.gameId, card: data.card, cards: data.cards });
         };
@@ -209,6 +206,49 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       });
     },
     [socket, connected, games]
+  );
+
+  const removeCard = useCallback(
+    async (
+      bet: number,
+      data: { gameId: string; playerId: string; cardNumber: number; userId?: string; telegramId?: string }
+    ): Promise<{ success: boolean; error?: string }> => {
+      if (!connected || !socket) return { success: false, error: am.notConnectedServer || 'Not connected' };
+
+      return new Promise((resolve) => {
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        const handleSuccess = () => {
+          cleanup();
+          resolve({ success: true });
+        };
+
+        const handleError = ({ message }: { message: string }) => {
+          toast.error(message);
+          cleanup();
+          resolve({ success: false, error: message });
+        };
+
+        const cleanup = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          socket.off("cardRemoved", handleSuccess);
+          socket.off("leftGame", handleSuccess);
+          socket.off("removeCardError", handleError);
+        };
+
+        timeoutId = setTimeout(() => {
+          cleanup();
+          resolve({ success: false, error: "Request timed out" });
+        }, 8000);
+
+        socket.once("cardRemoved", handleSuccess);
+        socket.once("leftGame", handleSuccess);
+        socket.once("removeCardError", handleError);
+
+        socket.emit("removeCard", { ...data, bet });
+      });
+    },
+    [socket, connected]
   );
 
   //✅ Watch a specific game
@@ -347,7 +387,6 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     handleGameUpdate(game);
 
     if (winner) {
-      toast.success(am.winnerWon(winner.name));
       let card = winner.card;
       const cardNumber = winner.cardNumber || card?.id;
       if (!card && cardNumber) {
@@ -381,7 +420,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const handleBingoWin = useCallback((data: BingoWinEventPayload) => {
-    const { winner, game, prize, pattern } = data;
+    const { winner, game, pattern } = data;
 
     const currentUser = userRef.current;
     const isUserWinner = Boolean(
@@ -400,10 +439,6 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     const calledNumbers = game?.calledNumbers || [];
 
     handleGameUpdate(game);
-
-    if (winner?.name) {
-      toast.success(am.winnerWonPrize(winner.name, prize));
-    }
 
     const winnerName = winner?.name ?? null;
     const winnerUsername =
@@ -453,7 +488,6 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const handleLeftGame = useCallback(() => {
-    toast.success(am.leftGame);
     setCurrentGame(null);
     sessionStorage.removeItem(PLAYER_GAME_DATA);
     let betVal = 20;
@@ -463,7 +497,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
         const parsed = JSON.parse(stored);
         if (parsed?.bet && !isNaN(Number(parsed.bet))) betVal = Number(parsed.bet);
       }
-    } catch {}
+    } catch { }
     router.push(`/cards?bet=${betVal}`);
   }, [router]);
 
@@ -553,6 +587,7 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
       setCurrentGame,
       refreshGames,
       joinGame,
+      removeCard,
       watchGame,
       leaveGame,
       // markNumber
