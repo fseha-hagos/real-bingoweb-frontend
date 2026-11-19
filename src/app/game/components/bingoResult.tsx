@@ -1,11 +1,12 @@
 "use client";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SELECTED_GAME_DATA, PLAYER_GAME_DATA } from "../../../constants/configurations";
 import { BingoWinPattern } from "../../../types/game";
 import { am } from "../../../constants/amharic";
 import { Trophy, ArrowRight, X } from "lucide-react";
 import cartelasData from "../../../data/cartelas.json";
+import { useAppNavigation } from "../../../context/NavigationContext";
 
 interface Cartela {
   id: number;
@@ -38,17 +39,26 @@ const BingoResult: React.FC<BingoResultProps> = ({
   winnerUsername = null,
 }) => {
   const router = useRouter();
+  const appNav = useAppNavigation();
   const [countdown, setCountdown] = useState<number>(5);
   // Keep bet in a ref so the interval closure always has the latest value
   const betRef = useRef(bet);
   useEffect(() => { betRef.current = bet; }, [bet]);
 
-  const navigateToCards = () => {
+  // Signal that auto-redirect should fire (set inside interval updater, acted on by effect)
+  const shouldNavigateRef = useRef(false);
+
+  const navigateToCards = useCallback(() => {
     sessionStorage.removeItem(PLAYER_GAME_DATA);
     const targetBet = betRef.current || 20;
     sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: targetBet }));
-    router.replace(`/cards?bet=${targetBet}`);
-  };
+    onClose();
+    if (appNav) {
+      appNav.navigateTo('/cards');
+    } else {
+      router.replace(`/cards?bet=${targetBet}`);
+    }
+  }, [router, onClose, appNav]);
 
   const handlePlayAgain = () => {
     navigateToCards();
@@ -64,15 +74,19 @@ const BingoResult: React.FC<BingoResultProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setCountdown(5);
+      shouldNavigateRef.current = false;
       return;
     }
 
     setCountdown(5);
+    shouldNavigateRef.current = false;
+
     const interval = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          navigateToCards();
+          // Cannot call router here (inside state updater) — use a ref flag instead
+          shouldNavigateRef.current = true;
           return 0;
         }
         return prev - 1;
@@ -82,6 +96,14 @@ const BingoResult: React.FC<BingoResultProps> = ({
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  // When countdown hits 0 (and flag is set), navigate — safely outside the updater
+  useEffect(() => {
+    if (countdown === 0 && shouldNavigateRef.current) {
+      shouldNavigateRef.current = false;
+      navigateToCards();
+    }
+  }, [countdown, navigateToCards]);
 
   if (!isOpen) return null;
 

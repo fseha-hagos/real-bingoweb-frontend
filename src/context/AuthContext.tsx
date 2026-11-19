@@ -87,24 +87,8 @@ function hasSessionUser(payload: unknown): boolean {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<AuthStatus>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const cached = localStorage.getItem("cached_auth_user");
-        if (cached) return "authenticated";
-      } catch { }
-    }
-    return "loading";
-  });
-  const [user, setUserState] = useState<UserSafeType | null>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const cached = localStorage.getItem("cached_auth_user");
-        if (cached) return JSON.parse(cached);
-      } catch { }
-    }
-    return null;
-  });
+  const [status, setStatus] = useState<AuthStatus>("loading");
+  const [user, setUserState] = useState<UserSafeType | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -182,6 +166,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const boot = async () => {
       try {
+        try {
+          const cached = localStorage.getItem("cached_auth_user");
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            setUserState(parsed);
+            setStatus("authenticated");
+          }
+        } catch { }
+
         // 1. Seamless Telegram authentication: auto-verify if launched from Telegram
         const tgPayload = getTelegramPayload();
         if (tgPayload) {
@@ -294,28 +287,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({ status, user, refreshUser, setUser, signOut }),
     [status, user, refreshUser, setUser, signOut]
   );
-
-  if (status === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-bg text-white">
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-brand-secondary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-sm text-gray-300">{am.checkingSession}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "unauthenticated" && !PUBLIC_PATHS.has(pathname)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-bg text-white">
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-brand-secondary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-sm text-gray-300">{am.redirectingLogin}</p>
-        </div>
-      </div>
-    );
-  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

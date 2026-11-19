@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Trophy } from 'lucide-react';
 import MasterBoardView from './components/masterBoardView';
@@ -13,6 +13,7 @@ import { toast } from 'react-toastify';
 import { am } from '../../constants/amharic';
 import { getDisplayName } from '../../lib/player';
 import { useAmharicBingoVoice } from '../../lib/useAmharicBIngoVoice';
+import { useAppNavigation } from '../../context/NavigationContext';
 
 const getLetter = (num: number) => {
   if (num >= 1 && num <= 15) return 'B';
@@ -52,6 +53,7 @@ const cartelaHeaders: { letter: string; bg: string; shadow: string }[] = [
 export default function GamePage() {
   const router = useRouter();
   const { socket, connected } = useSocket();
+  const appNav = useAppNavigation(); // null when accessed via /game directly
   const {
     currentGame,
     bingoResultData,
@@ -72,6 +74,10 @@ export default function GamePage() {
 
   const [bingoClaiming, setBingoClaiming] = useState(false);
   const [isRemoved, setIsRemoved] = useState(false);
+
+  // Ref to read currentGame inside effects without adding it to deps
+  const currentGameRef = useRef(currentGame);
+  useEffect(() => { currentGameRef.current = currentGame; }, [currentGame]);
 
   // Multi-cartela states
   const [playerCards, setPlayerCards] = useState<Cartela[]>([]);
@@ -130,19 +136,21 @@ export default function GamePage() {
   }, [connected, currentGame?.bet, watchGame]);
 
   // Restore player session on mount
+  // Use a ref to ensure we only run this logic ONCE per game ID, not on every state change
+  const lastRestoredGameId = useRef<string | null>(null);
+
   useEffect(() => {
     if (userLoading || gameLoading) return;
     if (resultOverlayOpen) return;
+    if (!user) return;
 
-    if (!user) {
-      return;
-    }
-
+    // Read session storage first (cheapest path)
     try {
       const savedData = sessionStorage.getItem(PLAYER_GAME_DATA);
       if (savedData) {
         const parsed = JSON.parse(savedData);
-        if (parsed.gameId) {
+        if (parsed.gameId && parsed.gameId !== lastRestoredGameId.current) {
+          lastRestoredGameId.current = parsed.gameId;
           setPlayerData(parsed);
           if (Array.isArray(parsed.cards) && parsed.cards.length > 0) {
             setPlayerCards(parsed.cards);
@@ -166,7 +174,8 @@ export default function GamePage() {
         const player = activeGame.players.find(matchesPlayer);
 
         if (player) {
-          if (!currentGame || currentGame.id !== activeGame.id) {
+          // Only update currentGame if it's a different game
+          if (!currentGameRef.current || currentGameRef.current.id !== activeGame.id) {
             setCurrentGame(activeGame);
           }
 
@@ -185,28 +194,31 @@ export default function GamePage() {
           }
 
           if (resolvedCards.length > 0) {
-            setPlayerCards(resolvedCards);
+            setPlayerCards((prev) => {
+              // Only update if actually different (avoid re-renders)
+              if (prev.length === resolvedCards.length &&
+                prev.every((c, i) => c.id === resolvedCards[i].id)) return prev;
+              return resolvedCards;
+            });
           }
 
-          const restoredData = {
-            gameId: activeGame.id,
-            userId: user.id,
-            telegramId: user.telegramId || user.id,
-            cardNumber: player.cardNumber,
-            cardNumbers: player.cardNumbers,
-            playerName: getDisplayName(user),
-            playerId: user.id,
-            bet: activeGame.bet,
-          };
-
-          if (!playerData || playerData.gameId !== activeGame.id) {
+          // Only write playerData if this is a new game
+          if (activeGame.id !== lastRestoredGameId.current) {
+            lastRestoredGameId.current = activeGame.id;
+            const restoredData = {
+              gameId: activeGame.id,
+              userId: user.id,
+              telegramId: user.telegramId || user.id,
+              cardNumber: player.cardNumber,
+              cardNumbers: player.cardNumbers,
+              playerName: getDisplayName(user),
+              playerId: user.id,
+              bet: activeGame.bet,
+            };
             setPlayerData(restoredData);
             sessionStorage.setItem(
               PLAYER_GAME_DATA,
-              JSON.stringify({
-                ...restoredData,
-                cards: resolvedCards,
-              })
+              JSON.stringify({ ...restoredData, cards: resolvedCards })
             );
           }
           return;
@@ -214,9 +226,9 @@ export default function GamePage() {
       }
     }
 
+    // No player in any active game — spectator mode
     const stored = sessionStorage.getItem(PLAYER_GAME_DATA);
-    if (!stored) {
-      // Spectator mode: Resolve game by selected bet or active started game
+    if (!stored && games) {
       let betVal = 20;
       try {
         const storedBet = sessionStorage.getItem(SELECTED_GAME_DATA);
@@ -226,27 +238,24 @@ export default function GamePage() {
         }
       } catch { }
 
-      if (games) {
-        const matchedGame =
-          games[betVal] ||
-          Object.values(games).find((g) => g.status === 'started') ||
-          Object.values(games)[0];
-        if (matchedGame && (!currentGame || currentGame.id !== matchedGame.id)) {
+      const matchedGame =
+        games[betVal] ||
+        Object.values(games).find((g) => g.status === 'started') ||
+        Object.values(games)[0];
+      if (matchedGame) {
+        if (!currentGameRef.current || currentGameRef.current.id !== matchedGame.id) {
           setCurrentGame(matchedGame);
         }
       }
     }
   }, [
-    router,
-    currentGame,
     userLoading,
     gameLoading,
     user,
     games,
     setCurrentGame,
-    playerData,
     resultOverlayOpen,
-  ]);
+  ]); // ← No playerData or currentGame in deps — they caused the infinite loop
 
   useEffect(() => {
     if (playerData && !currentGame && games) {
@@ -303,13 +312,15 @@ export default function GamePage() {
   const handleBingoClaimError = useCallback(
     ({ message, removed }: { message: string; removed: boolean }) => {
       setBingoClaiming(false);
+      // Suppress claim error if game is already finished or winner overlay is active
+      if (currentGameRef.current?.status === 'finished' || resultOverlayOpen) return;
       toast.error(message, { toastId: 'bingo-claim-error' });
       if (removed) {
         setIsRemoved(true);
         toast.error(am.tooManyAttempts, { toastId: 'bingo-too-many' });
       }
     },
-    []
+    [resultOverlayOpen]
   );
 
   useEffect(() => {
@@ -384,12 +395,16 @@ export default function GamePage() {
       const isGameLive = currentGame && (currentGame.status === 'started' || currentGame.status === 'waiting');
 
       if (!hasPlayerCards && !isGameLive) {
-        router.replace('/cards');
+        if (appNav) {
+          appNav.navigateTo('/cards');
+        } else {
+          router.replace('/cards');
+        }
       }
     }, 1500); // give more time for state to settle
 
     return () => clearTimeout(timer);
-  }, [userLoading, gameLoading, playerCards.length, currentGame, resultOverlayOpen, bingoResultData, router]);
+  }, [userLoading, gameLoading, playerCards.length, currentGame, resultOverlayOpen, bingoResultData, router, appNav]);
   // Note: The BingoResult component handles its own 5s countdown + redirect to /cards.
   // No separate fallback timer needed here — it would conflict with BingoResult's handlePlayAgain.
 
@@ -486,7 +501,10 @@ export default function GamePage() {
       <div className="flex items-center justify-between gap-2 py-1">
         {/* Back Button: "← ተመለስ" */}
         <button
-          onClick={leaveGame}
+          onClick={() => {
+            leaveGame();
+            if (appNav) appNav.navigateTo('/cards');
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#111927] border border-slate-700/60 text-slate-200 hover:text-white hover:bg-slate-800 transition active:scale-95 text-xs font-bold shadow-sm"
         >
           <ArrowLeft className="w-3.5 h-3.5 text-slate-400" />
@@ -546,8 +564,8 @@ export default function GamePage() {
         {playerCards.length > 0 ? (
           <div
             className={`w-full ${playerCards.length === 1
-                ? 'max-w-xs mx-auto'
-                : 'grid grid-cols-2 gap-2 sm:gap-2.5'
+              ? 'max-w-xs mx-auto'
+              : 'grid grid-cols-2 gap-2 sm:gap-2.5'
               }`}
           >
             {playerCards.map((card) => {
@@ -597,12 +615,12 @@ export default function GamePage() {
                             type="button"
                             onClick={() => handleNumberSelect(num)}
                             className={`aspect-square w-full rounded-lg font-black text-xs sm:text-sm flex items-center justify-center transition-all duration-150 relative overflow-hidden active:scale-95 ${isFree
-                                ? 'bg-gradient-to-br from-[#8b5cf6] to-[#a855f7] text-white shadow-sm border border-purple-400/50'
-                                : isSelected
-                                  ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/40 border border-emerald-300 ring-1 ring-emerald-300'
-                                  : isCalled
-                                    ? 'bg-[#1e293b] text-white border border-amber-400/60 animate-pulse'
-                                    : 'bg-[#121a2d] text-white border border-slate-800/80 hover:bg-[#18233c]'
+                              ? 'bg-gradient-to-br from-[#8b5cf6] to-[#a855f7] text-white shadow-sm border border-purple-400/50'
+                              : isSelected
+                                ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/40 border border-emerald-300 ring-1 ring-emerald-300'
+                                : isCalled
+                                  ? 'bg-[#1e293b] text-white border border-amber-400/60 animate-pulse'
+                                  : 'bg-[#121a2d] text-white border border-slate-800/80 hover:bg-[#18233c]'
                               }`}
                           >
                             {isFree ? (
@@ -647,10 +665,10 @@ export default function GamePage() {
             onClick={handleBingoClick}
             disabled={isRemoved || bingoClaiming}
             className={`w-full py-3.5 sm:py-4 rounded-2xl font-black text-lg sm:text-xl uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] shadow-2xl relative overflow-hidden ${bingoClaiming || isRemoved
-                ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-                : isAnyCardWinning
-                  ? 'bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-600 text-white shadow-emerald-500/50 ring-4 ring-emerald-400/30 animate-pulse'
-                  : 'bg-[#10b981] hover:bg-[#059669] text-white shadow-[0_4px_25px_rgba(16,185,129,0.45)]'
+              ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              : isAnyCardWinning
+                ? 'bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-600 text-white shadow-emerald-500/50 ring-4 ring-emerald-400/30 animate-pulse'
+                : 'bg-[#10b981] hover:bg-[#059669] text-white shadow-[0_4px_25px_rgba(16,185,129,0.45)]'
               }`}
           >
             BINGO
@@ -665,7 +683,10 @@ export default function GamePage() {
       <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-800/60 mt-2">
         <button
           type="button"
-          onClick={leaveGame}
+          onClick={() => {
+            leaveGame();
+            if (appNav) appNav.navigateTo('/cards');
+          }}
           className="px-3.5 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs font-bold text-red-400 hover:bg-red-500/20 transition active:scale-95"
         >
           {am.quitGame}

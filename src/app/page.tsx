@@ -1,133 +1,50 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { SELECTED_GAME_DATA, PLAYER_GAME_DATA } from '../constants/configurations';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AppNavigationContext } from '../context/NavigationContext';
 import { useGames } from '../context/gameContext';
+import CardsPage from './cards/page';
+import GamePage from './game/page';
 
 /**
- * Root "/" page — smart redirect hub.
+ * Root "/" — State-driven Single-Page Bingo Container.
  *
- * Rules (checked in priority order):
- *  1. If the player has PLAYER_GAME_DATA in session AND the matching game is
- *     currently "started"  → /game
- *  2. If the player has PLAYER_GAME_DATA but the game is "waiting" (countdown)
- *     → /game  (they'll see the waiting banner there)
- *  3. If ANY game is "started" but the player has no session data
- *     → /cards?bet=X  (spectator; cards page handles the "game live" banner)
- *  4. Otherwise (waiting lobby, finished, or no active game)
- *     → /cards?bet=X
+ * Cards view (cartela selection) and Game view (active board & results)
+ * exist on the SAME page as components, controlled directly by the live game state.
  *
- * We wait at most 2 s for the context to settle before falling through to /cards.
+ * - When game is 'waiting': Renders CardsPage (choose cartelas & countdown).
+ * - When game is 'started' or 'finished': Renders GamePage (live numbers & winner overlay).
+ * - Transitions happen in 0ms purely in React memory with NO full-page network fetch!
  */
 export default function RootPage() {
-  const router = useRouter();
-  const { games, currentGame, userLoading, gameLoading } = useGames();
-  const redirectedRef = useRef(false);
+  const { currentGame } = useGames();
+  const [manualView, setManualView] = useState<'cards' | 'game' | null>(null);
 
-  // Helper: resolve the target bet from URL params → session storage → localStorage
-  const resolveBet = (): number => {
-    if (typeof window === 'undefined') return 20;
-    const params = new URLSearchParams(window.location.search);
-    const queryBet = params.get('bet') || params.get('stake');
-    if (queryBet && !isNaN(Number(queryBet))) return Number(queryBet);
+  // Automatic view derived directly from active game status
+  const isGameActive = Boolean(
+    currentGame && (currentGame.status === 'started' || currentGame.status === 'finished')
+  );
 
-    try {
-      const stored =
-        sessionStorage.getItem(SELECTED_GAME_DATA) ||
-        localStorage.getItem('lastBet');
-      if (stored) {
-        const parsed = stored.startsWith('{') ? JSON.parse(stored) : null;
-        if (parsed?.bet && !isNaN(Number(parsed.bet))) return Number(parsed.bet);
-        if (!isNaN(Number(stored))) return Number(stored);
-      }
-    } catch { }
-    return 20;
-  };
+  const activeView: 'cards' | 'game' =
+    manualView !== null ? manualView : isGameActive ? 'game' : 'cards';
 
-  const navigate = (path: string) => {
-    if (redirectedRef.current) return;
-    redirectedRef.current = true;
-    router.replace(path);
-  };
-
+  // Whenever game transitions between statuses (e.g. waiting -> started, or finished -> waiting),
+  // reset manual override so state naturally drives the screen.
   useEffect(() => {
-    // Still loading auth/games — wait
-    if (userLoading || gameLoading) return;
+    setManualView(null);
+  }, [currentGame?.status, currentGame?.id]);
 
-    const betVal = resolveBet();
-
-    // Persist bet choice
-    try {
-      sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: betVal }));
-      localStorage.setItem('lastBet', String(betVal));
-    } catch { }
-
-    // ── Check PLAYER_GAME_DATA (player has previously joined a game) ──
-    let playerSession: { gameId?: string; bet?: number } | null = null;
-    try {
-      const raw = sessionStorage.getItem(PLAYER_GAME_DATA);
-      if (raw) playerSession = JSON.parse(raw);
-    } catch { }
-
-    if (playerSession?.gameId) {
-      // Find the matching game in live state
-      const allGames = Object.values(games || {});
-      const matchedGame =
-        allGames.find(g => g.id === playerSession!.gameId) ||
-        currentGame;
-
-      if (matchedGame) {
-        if (matchedGame.status === 'started' || matchedGame.status === 'waiting') {
-          // Player is mid-game or in countdown — go to game page
-          navigate('/game');
-          return;
-        }
-        if (matchedGame.status === 'finished') {
-          // Game just finished — clear stale session and go to cards
-          sessionStorage.removeItem(PLAYER_GAME_DATA);
-          navigate(`/cards?bet=${matchedGame.bet || betVal}`);
-          return;
-        }
-      } else {
-        // Game not in live state yet (still loading or ended) — go to game page
-        // The game page will handle the "no active game" redirect itself
-        navigate('/game');
-        return;
-      }
+  const handleNavigate = useCallback((path: string) => {
+    if (path === '/game' || path.startsWith('/game')) {
+      setManualView('game');
+    } else {
+      setManualView('cards');
     }
-
-    // ── No player session: check if any game is currently running ──
-    const allGames = Object.values(games || {});
-    const startedGame = allGames.find(g => g.status === 'started');
-    if (startedGame) {
-      // A game is live — send to cards with the right bet so they can at least watch
-      navigate(`/cards?bet=${startedGame.bet}`);
-      return;
-    }
-
-    // Default: go to cards page with the resolved bet
-    navigate(`/cards?bet=${betVal}`);
-  }, [userLoading, gameLoading, games, currentGame, router]);
-
-  // Fallback: if context takes > 2 s, just go to cards (avoid endless spinner)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!redirectedRef.current) {
-        const betVal = resolveBet();
-        navigate(`/cards?bet=${betVal}`);
-      }
-    }, 2000);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <div className="flex-1 min-h-screen bg-brand-bg text-white flex flex-col items-center justify-center p-4">
-      <div className="w-10 h-10 rounded-full border-[3px] border-emerald-500/20 border-t-emerald-400 animate-spin mb-3" />
-      <p className="text-xs font-bold text-gray-400 tracking-wider">
-        ወደ ጨዋታ በመሸጋገር ላይ...
-      </p>
-    </div>
+    <AppNavigationContext.Provider value={{ navigateTo: handleNavigate }}>
+      {activeView === 'game' ? <GamePage /> : <CardsPage />}
+    </AppNavigationContext.Provider>
   );
 }

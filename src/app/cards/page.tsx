@@ -10,12 +10,14 @@ import { PLAYER_GAME_DATA, SELECTED_GAME_DATA } from '../../constants/configurat
 import { toast } from 'react-toastify';
 import { am, translateGameStatus } from '../../constants/amharic';
 import { getDisplayName } from '../../lib/player';
+import { useAppNavigation } from '../../context/NavigationContext';
 
 // Card states: 'idle' | 'pendingAdd' | 'confirmed' | 'pendingRemove'
 type CardState = 'pendingAdd' | 'confirmed' | 'pendingRemove';
 
 export default function CardsPage() {
   const router = useRouter();
+  const appNav = useAppNavigation(); // null when accessed via /cards directly
 
   // Map of cardNumber -> state for cards the user has interacted with
   // Cards not in this map are 'idle'
@@ -148,11 +150,16 @@ export default function CardsPage() {
     });
 
     // Clear pendingAdd states for cards now confirmed by server
+    // Clear pendingRemove states for cards now confirmed removed by server
     setCardStates(prev => {
       let changed = false;
       const next = new Map(prev);
       for (const [num, state] of prev) {
         if (state === 'pendingAdd' && confirmSet.has(num)) {
+          next.delete(num);
+          changed = true;
+        }
+        if (state === 'pendingRemove' && !confirmSet.has(num)) {
           next.delete(num);
           changed = true;
         }
@@ -224,8 +231,14 @@ export default function CardsPage() {
       }
     }
 
-    router.push('/game');
-  }, [currentGame, user, cartelasList, router]);
+    // Use in-app navigation when inside the SPA root shell (instant, no fetch)
+    // Fall back to Next.js router when accessed via /cards directly
+    if (appNav) {
+      appNav.navigateTo('/game');
+    } else {
+      router.push('/game');
+    }
+  }, [currentGame, user, cartelasList, router, appNav]);
 
   // Navigate when game starts or is already started
   useEffect(() => {
@@ -287,7 +300,7 @@ export default function CardsPage() {
           setCardState(number, null); // revert — card is still there
           toast.error(result.error || 'Failed to remove card');
         } else {
-          setCardState(number, null);
+          // Keep pendingRemove in state until server sync confirms it's removed
           setServerCards(prev => { const n = new Set(prev); n.delete(number); return n; });
           // Update session storage
           const remaining = Array.from(myCardsSet).filter(n => n !== number);
@@ -382,8 +395,7 @@ export default function CardsPage() {
           return;
         }
 
-        // Add confirmed — mark as confirmed and update server state
-        setCardState(number, null); // remove pendingAdd, it'll be in serverCards now
+        // Add confirmed — keep pendingAdd until server sync verifies, but record in serverCards
         setServerCards(prev => new Set([...prev, number]));
 
         const allCardNums = Array.from(new Set([...myCardsSet, number]));
@@ -555,7 +567,7 @@ export default function CardsPage() {
               {Array.from({ length: 100 }, (_, i) => {
                 const number = i + 1;
                 const isMyRegisteredCard = myCardsSet.has(number);
-                const isTakenByOther = takenByOthers.has(number);
+                const isTakenByOther = takenByOthers.has(number) && !isMyRegisteredCard;
                 const isPreview = previewCardNumber === number;
 
                 return (
