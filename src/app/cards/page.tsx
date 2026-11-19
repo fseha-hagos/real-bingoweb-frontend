@@ -11,36 +11,19 @@ import { toast } from 'react-toastify';
 import { am, translateGameStatus } from '../../constants/amharic';
 import { getDisplayName } from '../../lib/player';
 
+// Card states: 'idle' | 'pendingAdd' | 'confirmed' | 'pendingRemove'
+type CardState = 'pendingAdd' | 'confirmed' | 'pendingRemove';
+
 export default function CardsPage() {
   const router = useRouter();
 
-  // --- Stable card selection state (no flicker) ---
-  // myCardsRef is the authoritative set; myCards is the React state derived from it
-  const myCardsRef = useRef<Set<number>>(new Set());
-  const [myCards, setMyCards] = useState<number[]>([]);
-  // Count of in-flight add/remove operations — while > 0, server gameUpdate is ignored
-  const inFlightRef = useRef(0);
-
-  const addCard = useCallback((n: number) => {
-    myCardsRef.current.add(n);
-    setMyCards(Array.from(myCardsRef.current));
-  }, []);
-
-  const removeCardLocal = useCallback((n: number) => {
-    myCardsRef.current.delete(n);
-    setMyCards(Array.from(myCardsRef.current));
-  }, []);
-
-  const setCardsFromServer = useCallback((nums: number[]) => {
-    // Only sync from server when no in-flight operations
-    if (inFlightRef.current > 0) return;
-    const next = new Set(nums);
-    // Skip if unchanged to avoid unnecessary re-renders
-    const cur = myCardsRef.current;
-    if (cur.size === next.size && [...next].every((n) => cur.has(n))) return;
-    myCardsRef.current = next;
-    setMyCards(Array.from(next));
-  }, []);
+  // Map of cardNumber -> state for cards the user has interacted with
+  // Cards not in this map are 'idle'
+  const [cardStates, setCardStates] = useState<Map<number, CardState>>(new Map());
+  // Server-confirmed cards (ground truth from backend)
+  const [serverCards, setServerCards] = useState<Set<number>>(new Set());
+  // Track if we want to cancel an in-flight add (quick add then remove)
+  const cancelAddRef = useRef<Set<number>>(new Set());
 
   const [previewCardNumber, setPreviewCardNumber] = useState<number | null>(null);
   const [cartelasList, setCartelasList] = useState<Cartela[]>(cartelasData as Cartela[]);
@@ -59,6 +42,25 @@ export default function CardsPage() {
     bonus: 0,
     maxPlayers: 10,
     countdown: { running: false, secondsLeft: 0 },
+  };
+
+  // The visible "my cards" is: serverCards + pendingAdds - pendingRemoves
+  const myCardsSet = useMemo(() => {
+    const result = new Set(serverCards);
+    cardStates.forEach((state, num) => {
+      if (state === 'pendingAdd') result.add(num);
+      if (state === 'pendingRemove') result.delete(num);
+    });
+    return result;
+  }, [serverCards, cardStates]);
+
+  const setCardState = (num: number, state: CardState | null) => {
+    setCardStates(prev => {
+      const next = new Map(prev);
+      if (state === null) next.delete(num);
+      else next.set(num, state);
+      return next;
+    });
   };
 
   // Subscribe and sync stake whenever connected or parameters change
@@ -114,91 +116,50 @@ export default function CardsPage() {
       ? cartelasList.find((c) => c.id === previewCardNumber) ?? null
       : null;
 
-  const navigatingRef = useRef(false);
-
-  const goToGame = useCallback(() => {
-    if (navigatingRef.current) return;
-    navigatingRef.current = true;
-
-    if (currentGame && user) {
-      const serverCards = myExistingPlayer
-        ? (myExistingPlayer.cardNumbers && myExistingPlayer.cardNumbers.length > 0
-          ? myExistingPlayer.cardNumbers
-          : myExistingPlayer.cardNumber ? [myExistingPlayer.cardNumber] : [])
-        : [];
-      const allCardNums = Array.from(new Set([...serverCards, ...myCardsRef.current]));
-
-      if (allCardNums.length > 0) {
-        const resolvedCards = allCardNums
-          .map(
-            (cn) =>
-              cartelasList.find((c) => c.id === cn) ||
-              (cartelasData as Cartela[]).find((c) => c.id === cn)
-          )
-          .filter(Boolean) as Cartela[];
-
-        sessionStorage.setItem(
-          PLAYER_GAME_DATA,
-          JSON.stringify({
-            gameId: currentGame.id,
-            userId: user.id,
-            telegramId: user.telegramId || user.id,
-            playerName: getDisplayName(user),
-            playerId: user.id,
-            cardNumber: allCardNums[0],
-            cardNumbers: allCardNums,
-            cards: resolvedCards,
-            bet: currentGame.bet,
-          })
-        );
-      }
+  // Sync server-confirmed cards from game state
+  // We track hasPendingOps to avoid overwriting in-flight local state
+  const hasPendingOps = useMemo(() => {
+    for (const [, state] of cardStates) {
+      if (state === 'pendingAdd' || state === 'pendingRemove') return true;
     }
+    return false;
+  }, [cardStates]);
 
-    router.push('/game');
-    setTimeout(() => {
-      navigatingRef.current = false;
-    }, 3000);
-  }, [currentGame, user, myExistingPlayer, cartelasList, router]);
-
-  // If game is already active and started, navigate to game page immediately
-  useEffect(() => {
-    if (game.status === 'started') {
-      goToGame();
-    }
-  }, [game.status, goToGame]);
-
-  // When countdown timer reaches 0 during session, route to /game
-  const pageMountTimeRef = useRef(Date.now());
-  useEffect(() => {
-    if (
-      game.countdown?.running &&
-      game.countdown.secondsLeft === 0 &&
-      Date.now() - pageMountTimeRef.current > 1500
-    ) {
-      goToGame();
-    }
-  }, [game.countdown?.running, game.countdown?.secondsLeft, goToGame]);
-
-  // Sync card list from server — skipped while any operation is in-flight
   useEffect(() => {
     if (!user) return;
-    if (inFlightRef.current > 0) return; // Don't overwrite while add/remove is in-progress
 
-    const serverCardNums: number[] = [];
+    const confirmed: number[] = [];
     game.players.forEach((p) => {
       const isMe =
         (user.id && p.id === user.id) ||
         (user.telegramId && (p.id === user.telegramId || p.telegramId === user.telegramId));
       if (isMe) {
-        if (p.cardNumber) serverCardNums.push(p.cardNumber);
-        if (p.cardNumbers) serverCardNums.push(...p.cardNumbers);
+        if (p.cardNumber) confirmed.push(p.cardNumber);
+        if (p.cardNumbers) confirmed.push(...p.cardNumbers);
       }
     });
 
-    setCardsFromServer(serverCardNums);
-  }, [game.players, user, setCardsFromServer]);
+    const confirmSet = new Set(confirmed);
 
-  const myCardsSet = useMemo(() => new Set(myCards), [myCards]);
+    setServerCards(prev => {
+      // Only update if actually changed (avoid unnecessary renders)
+      if (prev.size === confirmSet.size && [...confirmSet].every(n => prev.has(n))) return prev;
+      return confirmSet;
+    });
+
+    // Clear pendingAdd states for cards now confirmed by server
+    setCardStates(prev => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [num, state] of prev) {
+        if (state === 'pendingAdd' && confirmSet.has(num)) {
+          next.delete(num);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [game.players, user]);
 
   // Cards taken by OTHER players
   const takenByOthers = useMemo(() => {
@@ -216,16 +177,102 @@ export default function CardsPage() {
     return taken;
   }, [game.players, user]);
 
+  // Keep a ref to myCardsSet so saveAndNavigate doesn't recreate on every render
+  const myCardsSetRef = useRef(myCardsSet);
+  useEffect(() => { myCardsSetRef.current = myCardsSet; }, [myCardsSet]);
+
+  // Keep a ref to myExistingPlayer to avoid stale closure in saveAndNavigate
+  const myExistingPlayerRef = useRef(myExistingPlayer);
+  useEffect(() => { myExistingPlayerRef.current = myExistingPlayer; }, [myExistingPlayer]);
+
+  // ---- Navigation ----
+  const hasNavigatedRef = useRef(false);
+
+  const saveAndNavigate = useCallback(() => {
+    if (hasNavigatedRef.current) return;
+    hasNavigatedRef.current = true;
+
+    if (currentGame && user) {
+      const ep = myExistingPlayerRef.current;
+      const serverNums = ep
+        ? (ep.cardNumbers?.length
+          ? ep.cardNumbers
+          : ep.cardNumber ? [ep.cardNumber] : [])
+        : [];
+      // Merge server cards + any locally confirmed cards
+      const allCardNums = Array.from(new Set([...serverNums, ...myCardsSetRef.current]));
+
+      if (allCardNums.length > 0) {
+        const resolvedCards = allCardNums
+          .map(cn =>
+            cartelasList.find((c) => c.id === cn) ||
+            (cartelasData as Cartela[]).find((c) => c.id === cn)
+          )
+          .filter(Boolean) as Cartela[];
+
+        sessionStorage.setItem(PLAYER_GAME_DATA, JSON.stringify({
+          gameId: currentGame.id,
+          userId: user.id,
+          telegramId: user.telegramId || user.id,
+          playerName: getDisplayName(user),
+          playerId: user.id,
+          cardNumber: allCardNums[0],
+          cardNumbers: allCardNums,
+          cards: resolvedCards,
+          bet: currentGame.bet,
+        }));
+      }
+    }
+
+    router.push('/game');
+  }, [currentGame, user, cartelasList, router]);
+
+  // Navigate when game starts or is already started
+  useEffect(() => {
+    if (game.status === 'started') {
+      // Small delay to ensure session storage is written before navigation
+      const t = setTimeout(() => saveAndNavigate(), 100);
+      return () => clearTimeout(t);
+    }
+  }, [game.status, saveAndNavigate]);
+
+  // Navigate when countdown hits 0
+  const pageMountTimeRef = useRef(Date.now());
+  useEffect(() => {
+    if (
+      game.countdown?.running &&
+      game.countdown.secondsLeft === 0 &&
+      Date.now() - pageMountTimeRef.current > 1500
+    ) {
+      saveAndNavigate();
+    }
+  }, [game.countdown?.running, game.countdown?.secondsLeft, saveAndNavigate]);
+
+  // ---- Card selection handler ----
   const handleCardSelect = async (number: number) => {
     setPreviewCardNumber(number);
 
-    const isAlreadySelected = myCardsSet.has(number);
+    const currentState = cardStates.get(number);
+    const isConfirmed = serverCards.has(number);
     const currentBet = currentGame?.bet || game.bet || 10;
 
-    // --- CASE A: Already selected -> deselect ---
-    if (isAlreadySelected) {
-      inFlightRef.current += 1;
-      removeCardLocal(number);
+    // Block clicks on cards that are mid-flight
+    if (currentState === 'pendingAdd') {
+      // User wants to cancel an in-progress add — mark it for cancellation
+      // The add handler will remove it after the server responds
+      cancelAddRef.current.add(number);
+      // Optimistically hide it immediately
+      setCardState(number, 'pendingRemove');
+      return;
+    }
+    if (currentState === 'pendingRemove') {
+      // Already being removed — ignore
+      return;
+    }
+
+    // --- CASE A: Confirmed by server -> Remove ---
+    if (isConfirmed || currentState === 'confirmed') {
+      setCardState(number, 'pendingRemove');
 
       try {
         const result = await removeCard(currentBet, {
@@ -237,17 +284,19 @@ export default function CardsPage() {
         });
 
         if (!result.success) {
-          addCard(number); // revert
+          setCardState(number, null); // revert — card is still there
           toast.error(result.error || 'Failed to remove card');
         } else {
-          const remaining = Array.from(myCardsRef.current);
+          setCardState(number, null);
+          setServerCards(prev => { const n = new Set(prev); n.delete(number); return n; });
+          // Update session storage
+          const remaining = Array.from(myCardsSet).filter(n => n !== number);
           const resolved = remaining
-            .map((num) =>
+            .map(num =>
               cartelasList.find((c) => c.id === num) ||
               (cartelasData as Cartela[]).find((c) => c.id === num)
             )
             .filter(Boolean) as Cartela[];
-
           if (remaining.length > 0 && currentGame && user) {
             sessionStorage.setItem(PLAYER_GAME_DATA, JSON.stringify({
               gameId: currentGame.id,
@@ -266,15 +315,12 @@ export default function CardsPage() {
         }
       } catch (err) {
         console.error('Error removing card:', err);
-        addCard(number); // revert
-      } finally {
-        inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+        setCardState(number, null); // revert
       }
       return;
     }
 
-    // --- CASE B: Not selected -> select ---
-
+    // --- CASE B: Idle -> Add ---
     if (takenByOthers.has(number)) {
       toast.error('ይህ ካርቴላ በሌላ ተጫዋች ተይዟል (Card already taken)');
       return;
@@ -296,8 +342,7 @@ export default function CardsPage() {
       return;
     }
 
-    inFlightRef.current += 1;
-    addCard(number);
+    setCardState(number, 'pendingAdd');
 
     try {
       const playerName = getDisplayName(user);
@@ -314,12 +359,36 @@ export default function CardsPage() {
       });
 
       if (!result.success) {
-        removeCardLocal(number); // revert
+        setCardState(number, null);
+        cancelAddRef.current.delete(number);
         toast.error(result.error || am.failedToJoin);
       } else {
-        const allCardNums = Array.from(myCardsRef.current);
+        // Check if user cancelled this card while it was being added
+        if (cancelAddRef.current.has(number)) {
+          cancelAddRef.current.delete(number);
+          // Now actually remove it since the add succeeded
+          setCardState(number, 'pendingRemove');
+          try {
+            await removeCard(currentBet, {
+              gameId: currentGame.id,
+              playerId: user.id,
+              cardNumber: number,
+              userId: user.id,
+              telegramId: user.telegramId || undefined,
+            });
+          } catch { /* ignore */ }
+          setCardState(number, null);
+          setServerCards(prev => { const n = new Set(prev); n.delete(number); return n; });
+          return;
+        }
+
+        // Add confirmed — mark as confirmed and update server state
+        setCardState(number, null); // remove pendingAdd, it'll be in serverCards now
+        setServerCards(prev => new Set([...prev, number]));
+
+        const allCardNums = Array.from(new Set([...myCardsSet, number]));
         const resolvedCards = allCardNums
-          .map((num) =>
+          .map(num =>
             cartelasList.find((c) => c.id === num) ||
             (cartelasData as Cartela[]).find((c) => c.id === num)
           )
@@ -339,10 +408,9 @@ export default function CardsPage() {
       }
     } catch (err) {
       console.error('Error confirming card:', err);
-      removeCardLocal(number); // revert
+      setCardState(number, null);
+      cancelAddRef.current.delete(number);
       toast.error(am.failedToJoinRetry);
-    } finally {
-      inFlightRef.current = Math.max(0, inFlightRef.current - 1);
     }
   };
 
