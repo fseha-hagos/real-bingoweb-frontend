@@ -122,7 +122,7 @@ export default function GamePage() {
           const parsed = JSON.parse(stored);
           if (parsed.bet) betVal = Number(parsed.bet);
         }
-      } catch {}
+      } catch { }
     }
     if (betVal) {
       watchGame(betVal);
@@ -224,7 +224,7 @@ export default function GamePage() {
           const parsed = JSON.parse(storedBet);
           if (parsed?.bet) betVal = Number(parsed.bet);
         }
-      } catch {}
+      } catch { }
 
       if (games) {
         const matchedGame =
@@ -373,9 +373,10 @@ export default function GamePage() {
   }, [currentGame?.status, currentGame?.winner, user, setResultOverlayOpen, setBingoResultData]);
 
   // Guard: If there is no active game and player hasn't joined -> Block and redirect to /cards
+  // Skip if the result overlay is open or we have result data (winner screen must be visible)
   useEffect(() => {
     if (userLoading || gameLoading) return;
-    if (resultOverlayOpen) return;
+    if (resultOverlayOpen || bingoResultData) return; // Never redirect while showing winner overlay
 
     const timer = setTimeout(() => {
       const stored = typeof window !== 'undefined' ? sessionStorage.getItem(PLAYER_GAME_DATA) : null;
@@ -385,22 +386,12 @@ export default function GamePage() {
       if (!hasPlayerCards && !isGameLive) {
         router.replace('/cards');
       }
-    }, 600);
+    }, 1500); // give more time for state to settle
 
     return () => clearTimeout(timer);
-  }, [userLoading, gameLoading, playerCards.length, currentGame, resultOverlayOpen, router]);
-
-  // Guaranteed fallback redirect when game finishes: After 5.5 seconds, return to /cards
-  useEffect(() => {
-    if (currentGame?.status === 'finished') {
-      const timer = setTimeout(() => {
-        const targetBet = currentGame?.bet || 20;
-        sessionStorage.removeItem(PLAYER_GAME_DATA);
-        router.replace(`/cards?bet=${targetBet}`);
-      }, 5500);
-      return () => clearTimeout(timer);
-    }
-  }, [currentGame?.status, currentGame?.bet, router]);
+  }, [userLoading, gameLoading, playerCards.length, currentGame, resultOverlayOpen, bingoResultData, router]);
+  // Note: The BingoResult component handles its own 5s countdown + redirect to /cards.
+  // No separate fallback timer needed here — it would conflict with BingoResult's handlePlayAgain.
 
   // Auto-Daub & Auto-Claim functionality
   useEffect(() => {
@@ -454,8 +445,9 @@ export default function GamePage() {
 
   const calledNumbers = currentGame?.calledNumbers || [];
 
-  // If loading and no game yet
-  if (!currentGame && (userLoading || gameLoading)) {
+  // If result overlay is open, never show a loading screen — always render the overlay
+  // If loading and no game yet (and no overlay)
+  if (!resultOverlayOpen && !bingoResultData && !currentGame && (userLoading || gameLoading)) {
     return (
       <div className="flex items-center justify-center h-screen text-white bg-[#0a0f1d]">
         <div className="text-center animate-pulse">
@@ -512,9 +504,8 @@ export default function GamePage() {
         {/* Live Status indicator */}
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[#111927] border border-slate-800 text-[11px] font-bold text-slate-400">
           <div
-            className={`w-2 h-2 rounded-full ${
-              connected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'
-            }`}
+            className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-red-500'
+              }`}
           />
           <span>{connected ? 'Live' : 'Offline'}</span>
         </div>
@@ -554,11 +545,10 @@ export default function GamePage() {
       <div className="flex-1 my-1 flex flex-col justify-center">
         {playerCards.length > 0 ? (
           <div
-            className={`w-full ${
-              playerCards.length === 1
+            className={`w-full ${playerCards.length === 1
                 ? 'max-w-xs mx-auto'
                 : 'grid grid-cols-2 gap-2 sm:gap-2.5'
-            }`}
+              }`}
           >
             {playerCards.map((card) => {
               const isWin = checkBingoWin(calledNumbers, card);
@@ -606,15 +596,14 @@ export default function GamePage() {
                             key={`${card.id}-${col}-${row}`}
                             type="button"
                             onClick={() => handleNumberSelect(num)}
-                            className={`aspect-square w-full rounded-lg font-black text-xs sm:text-sm flex items-center justify-center transition-all duration-150 relative overflow-hidden active:scale-95 ${
-                              isFree
+                            className={`aspect-square w-full rounded-lg font-black text-xs sm:text-sm flex items-center justify-center transition-all duration-150 relative overflow-hidden active:scale-95 ${isFree
                                 ? 'bg-gradient-to-br from-[#8b5cf6] to-[#a855f7] text-white shadow-sm border border-purple-400/50'
                                 : isSelected
                                   ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/40 border border-emerald-300 ring-1 ring-emerald-300'
                                   : isCalled
                                     ? 'bg-[#1e293b] text-white border border-amber-400/60 animate-pulse'
                                     : 'bg-[#121a2d] text-white border border-slate-800/80 hover:bg-[#18233c]'
-                            }`}
+                              }`}
                           >
                             {isFree ? (
                               <span className="text-[9px] sm:text-[10px] font-black">
@@ -657,13 +646,12 @@ export default function GamePage() {
             type="button"
             onClick={handleBingoClick}
             disabled={isRemoved || bingoClaiming}
-            className={`w-full py-3.5 sm:py-4 rounded-2xl font-black text-lg sm:text-xl uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] shadow-2xl relative overflow-hidden ${
-              bingoClaiming || isRemoved
+            className={`w-full py-3.5 sm:py-4 rounded-2xl font-black text-lg sm:text-xl uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] shadow-2xl relative overflow-hidden ${bingoClaiming || isRemoved
                 ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
                 : isAnyCardWinning
                   ? 'bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-600 text-white shadow-emerald-500/50 ring-4 ring-emerald-400/30 animate-pulse'
                   : 'bg-[#10b981] hover:bg-[#059669] text-white shadow-[0_4px_25px_rgba(16,185,129,0.45)]'
-            }`}
+              }`}
           >
             BINGO
             {!bingoClaiming && !isRemoved && (

@@ -282,6 +282,11 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
     }));
 
     setCurrentGame(prev => {
+      // If the result overlay is open and this is a DIFFERENT game arriving,
+      // don't replace the current finished game — keep it so the overlay stays visible.
+      if (prev?.status === 'finished' && game.id !== prev.id) {
+        return prev;
+      }
       if (!prev || prev.id !== game.id) {
         console.log("🔄 Switching current game to:", game.id);
         return game;

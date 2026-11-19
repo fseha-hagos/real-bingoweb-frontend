@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SELECTED_GAME_DATA, PLAYER_GAME_DATA } from "../../../constants/configurations";
 import { BingoWinPattern } from "../../../types/game";
@@ -39,19 +39,24 @@ const BingoResult: React.FC<BingoResultProps> = ({
 }) => {
   const router = useRouter();
   const [countdown, setCountdown] = useState<number>(5);
+  // Keep bet in a ref so the interval closure always has the latest value
+  const betRef = useRef(bet);
+  useEffect(() => { betRef.current = bet; }, [bet]);
 
-  const handlePlayAgain = () => {
+  const navigateToCards = () => {
     sessionStorage.removeItem(PLAYER_GAME_DATA);
-    const targetBet = bet || 20;
+    const targetBet = betRef.current || 20;
     sessionStorage.setItem(SELECTED_GAME_DATA, JSON.stringify({ bet: targetBet }));
     router.replace(`/cards?bet=${targetBet}`);
+  };
+
+  const handlePlayAgain = () => {
+    navigateToCards();
     if (onPlayAgain) onPlayAgain();
   };
 
   const handleCancel = () => {
-    sessionStorage.removeItem(PLAYER_GAME_DATA);
-    const targetBet = bet || 20;
-    router.replace(`/cards?bet=${targetBet}`);
+    navigateToCards();
     onClose();
   };
 
@@ -67,7 +72,7 @@ const BingoResult: React.FC<BingoResultProps> = ({
       setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          handlePlayAgain();
+          navigateToCards();
           return 0;
         }
         return prev - 1;
@@ -75,7 +80,8 @@ const BingoResult: React.FC<BingoResultProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isOpen, bet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
