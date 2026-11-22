@@ -318,7 +318,8 @@ export default function GamePage() {
         currentGameRef.current.status !== 'started' ||
         resultOverlayOpen ||
         message.includes('አልተጀመረም') ||
-        message.includes('አልተገኘም')
+        message.includes('አልተገኘም') ||
+        message.includes('ተጀምሯል')
       ) {
         return;
       }

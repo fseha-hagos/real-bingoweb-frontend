@@ -489,6 +489,9 @@ export const GameProvider = ({ children }: { children: ReactNode }) => {
 
 
   const handleLeaveGameError = useCallback(({ message }: { message: string }) => {
+    if (!message || message.includes('አልተገኘም') || message.includes('አልተጀመረም') || message.includes('ተጀምሯል')) {
+      return;
+    }
     toast.error(message);
   }, []);
 
