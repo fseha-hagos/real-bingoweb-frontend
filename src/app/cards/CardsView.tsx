@@ -576,10 +576,10 @@ export default function CardsPage() {
             </div>
 
             <div
-              className={`w-full ${cardsToShow.length === 1
-                ? 'w-[calc(50%-0.25rem)] mx-auto'
-                : 'grid grid-cols-2 gap-2 sm:gap-2.5'
-                }`}
+              className={cardsToShow.length === 1
+                ? 'w-[calc(50%-0.25rem)] max-w-[240px] mx-auto'
+                : 'w-full grid grid-cols-2 gap-2 sm:gap-2.5'
+              }
             >
               {cardsToShow.map((card) => {
                 const isSelected = selectedCards.has(card.id);
